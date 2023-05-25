@@ -1,5 +1,4 @@
 import numpy as np
-from numba import njit
 
 from pylinger_cosmo import cosmo
 from pylinger_thermo import thermal_history
@@ -8,6 +7,7 @@ from scipy.integrate import solve_ivp
 
 
 class pt_synchronous:
+
     def model(self, tau: float, yin: np.ndarray) -> np.ndarray:
         y = np.copy(yin).reshape((self.nmodes, self.nvar))
         f = np.zeros_like(y)
@@ -42,6 +42,7 @@ class pt_synchronous:
 
         tempb, cs2, xe = self.th.evaluate_at_tau(tau)
 
+        # ... Thomson opacity coefficient
         akthom = 2.3048e-9 * (1.0 - self.cp.YHe) * self.cp.Omegab * self.cp.H0**2
 
         # ... Thomson opacity
@@ -83,6 +84,8 @@ class pt_synchronous:
         etadot = 0.5 * dgtheta / self.ak**2
         f[:, 2] = etadot
 
+        dgshear = 4.0 / 3.0 * (self.cp.grhog * shearg + 3.0 * self.cp.grhor * shearr) / a**2
+
         # ... cdm equations of motion
         deltacdot = -thetac - 0.5 * hdot
         f[:, 3] = deltacdot
@@ -95,7 +98,7 @@ class pt_synchronous:
         # ... need photon perturbation for first-order correction to tightly-coupled baryon-photon approx.
         deltagdot = 4.0 / 3.0 * (-thetag - 0.5 * hdot)
         drag = opac * (thetag - thetab)
-        thetabdot = np.ones_like(thetab)
+        thetabdot = 1.0
 
         if tempb < 2.0e4:
             # ... treat baryons and photons as uncoupled
@@ -117,11 +120,7 @@ class pt_synchronous:
             # ... first oder approximation to baryon velocity
             thetabdot += pb43 / (1.0 + pb43) * slip
 
-        ###
         f[:, 6] = thetabdot
-
-        # if a > g_apuregravity:
-        #     f[6] = -adotoa*thetab;
 
         # ... photon total intensity and polarization equations of motion
         f[:, 7] = deltagdot
@@ -151,13 +150,13 @@ class pt_synchronous:
                 - opac * y[:, 10 + self.lmax]
                 + 0.1 * opac * polter
             )
-            for j in range(2, self.lmax-1):
-                f[:, 8 + j] = (
-                    self.ak * self.denl[j] * ((j + 1) * y[:, 7 + j] - (j + 2) * y[:, 9 + j]) - opac * y[:, 8 + j]
+            for i in range(2, self.lmax - 1):
+                f[:, 8 + i] = (
+                    self.ak * self.denl[i] * ((i + 1) * y[:, 7 + i] - (i + 2) * y[:, 9 + i]) - opac * y[:, 8 + i]
                 )
-                f[:, 9 + self.lmax + j] = (
-                    self.ak * self.denl[j] * ((j + 1) * y[:, 8 + self.lmax + j] - (j + 2) * y[:, 10 + self.lmax + j])
-                    - opac * y[:, 9 + self.lmax + j]
+                f[:, 9 + self.lmax + i] = (
+                    self.ak * self.denl[i] * ((i + 1) * y[:, 8 + self.lmax + i] - (i + 2) * y[:, 10 + self.lmax + i])
+                    - opac * y[:, 9 + self.lmax + i]
                 )
 
         else:
@@ -165,11 +164,11 @@ class pt_synchronous:
             f[:, 8 + self.lmax] = 0.0
             f[:, 9 + self.lmax] = 0.0
             f[:, 10 + self.lmax] = 0.0
-            for i in range(2, self.lmax-1):
-                f[:, 8 + i] = 0.0
-                f[:, 9 + self.lmax + i] = 0.0
+            for l in range(2, self.lmax - 1):
+                f[:, 8 + l] = 0.0
+                f[:, 9 + self.lmax + l] = 0.0
 
-        # ... truncate moment expan sion
+        # ... truncate moment expansion
         f[:, 7 + self.lmax] = (
             self.ak * y[:, 6 + self.lmax] - (self.lmax + 1) / tau * y[:, 7 + self.lmax] - opac * y[:, 7 + self.lmax]
         )
@@ -200,7 +199,8 @@ class pt_synchronous:
 
     def adiabatic_ics(self, tau: float) -> np.ndarray:
         y = np.zeros((self.nmodes, self.nvar))
-        a = self.cp.get_a(tau)
+        # a = self.cp.get_a(tau)
+        a = tau * self.cp.adotrad
         a2 = a**2
 
         grho = (
@@ -264,8 +264,8 @@ class pt_synchronous:
         y[:, 10 + 2 * self.lmax] = thetar
         y[:, 11 + 2 * self.lmax] = shearr * 2.0
 
-        for l in range(2, self.lmax):
-          y[:, 10 + 2 * (self.lmax+1):] = 0.0
+        # for l in range(2, self.lmax):
+        y[:, 10 + 2 * (self.lmax + 1) :] = 0.0
 
         return y.flatten()
 
@@ -273,9 +273,11 @@ class pt_synchronous:
         self.cp = cp
         self.th = th
 
-    def compute(self, *, kmodes: np.ndarray, aexp_out: np.ndarray, rtol : float = 1e-3, atol : float = 1e-6) -> tuple[np.ndarray, np.ndarray]:
+    def compute(
+        self, *, kmodes: np.ndarray, aexp_out: np.ndarray, rtol: float = 1e-3, atol: float = 1e-4
+    ) -> tuple[np.ndarray, np.ndarray]:
         tau_out = self.cp.get_tau(aexp_out)
-        tau_min = np.min(tau_out)
+        tau_start = np.minimum(1e-3 / np.max(kmodes), 0.1)
         tau_max = np.max(tau_out)
 
         self.nout = aexp_out.shape[0]
@@ -289,10 +291,8 @@ class pt_synchronous:
         self.nvar = 7 + 3 * (self.lmax + 1)
         self.nmodes = self.ak.shape[0]
 
-        print( tau_min, tau_max)
-
-        y0 = self.adiabatic_ics(tau_min)
-        sol = solve_ivp(self.model, (tau_min, tau_max), y0, t_eval=tau_out, rtol=rtol, atol=atol)
+        y0 = self.adiabatic_ics(tau_start)
+        sol = solve_ivp(self.model, (tau_start, tau_max), y0, t_eval=tau_out, rtol=rtol, atol=atol)
 
         return np.array(sol["y"]).reshape((self.nmodes, self.nvar, self.nout)), np.array(sol["t"])
         # return y0.reshape((self.nmodes, self.nvar))
