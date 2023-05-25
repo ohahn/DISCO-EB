@@ -28,7 +28,7 @@ class cosmo:
 
         amin = 0.0
         amax = 1.1
-        a = np.geomspace(1e-6, amax, 1000)
+        a = np.geomspace(1e-9, amax, 1000)
         a[0] = amin
         tauini = 0.0
         sol = solve_ivp(self.dtauda, (amin, amax), [tauini], jac=self.d2tauda2, method="BDF", t_eval=a)
