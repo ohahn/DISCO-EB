@@ -46,7 +46,8 @@ def ionize(tempb: float, a: float, adot: float, dtau: float, xe: float, YHe: flo
     return xe
 
 
-def ionHe(tempb: float, a: float, x0: float, x1: float, x2: float, YHe: float, H0: float, Omegab: float) -> Tuple[float, float]:
+def ionHe(tempb: float, a: float, x0: float, x1: float, x2: float, YHe: float, H0: float, Omegab: float,
+          enforce_tolerance: bool = False, tol: float = 1e-12, n_iter_max: int = 5) -> Tuple[float, float]:
     """Compute the helium ionization fractions using the Saha equation
     """
     tion1 = 2.855e5
@@ -66,10 +67,7 @@ def ionHe(tempb: float, a: float, x0: float, x1: float, x2: float, YHe: float, H
     c = 0.25 * YHe / (1.0 - YHe)
     err = onp.infty
 
-    tol = 1e-12
-    cond_fun = lambda vals: vals[0] > tol
-
-    def body_fun(vals):
+    def body_fun(i, vals):
         err, xe, x1, x2 = vals
         xe = x0 + c * (x1 + 2.0 * x2)
         x2new = r1 * r2 / (r1 * r2 + xe * r1 + xe * xe)
@@ -78,7 +76,16 @@ def ionHe(tempb: float, a: float, x0: float, x1: float, x2: float, YHe: float, H
         return err, xe, x1, x2new
 
     xe = x0 + c * (x1 + 2.0 * x2)
-    out = jax.lax.while_loop(cond_fun, body_fun, (err, xe, x1, x2))
+
+    # if tolerance shall be enforced: while-loop is used, which is NOT reverse-mode differentiable!
+    if enforce_tolerance:
+        cond_fun = lambda vals: vals[0] > tol
+        out = jax.lax.while_loop(lambda vals: cond_fun(0, vals), body_fun, (err, xe, x1, x2))
+
+    else:
+        # for-loop instead
+        out = jax.lax.fori_loop(lower=0, upper=n_iter_max, body_fun=body_fun, init_val=(err, xe, x1, x2))
+
     x1, x2 = out[2], out[3]
     return x1, x2
 
@@ -163,7 +170,20 @@ def compute(*, taumin: float, taumax: float, nthermo: int, Tcmb: float, YHe: flo
                          xHeII=new_xHeII, xHeIII=new_xHeIII, cs2=new_cs2)
         return new_carry, new_carry
 
-    out = jax.lax.scan(scan_fun, init, xs=jnp.arange(1, nthermo))[1]
+    # def scan_manual(f, init, xs, length=None):
+    #     if xs is None:
+    #         xs = [None] * length
+    #     carry = init
+    #     ys = []
+    #     for x in xs:
+    #         carry, y = f(carry, x)
+    #         ys.append(y)
+    #     return carry, jnp.stack(ys)
+
+    # scan = scan_manual  # for debugging
+
+    scan = jax.lax.scan
+    out = scan(scan_fun, init, xs=jnp.arange(1, nthermo))[1]
     out_with_init = {k: jnp.concatenate((jnp.atleast_1d(init[k]), out[k])) for k in keys}
 
     return out_with_init
