@@ -91,9 +91,9 @@ class thermal_history:
         # set up fields
         tb = np.zeros((nthermo))
         xe = np.zeros((nthermo))
-        xH = np.zeros((nthermo))
-        xHeI = np.zeros((nthermo))
+        xHII = np.zeros((nthermo))
         xHeII = np.zeros((nthermo))
+        xHeIII = np.zeros((nthermo))
 
         cs2 = np.zeros((nthermo))
         ttau = np.zeros((nthermo))
@@ -110,9 +110,9 @@ class thermal_history:
         xe0 = 1.0
         x1 = 0.0
         x2 = 1.0
-        xH[0] = xe0
-        xHeI[0] = x1
-        xHeII[0] = x2
+        xHII[0] = xe0
+        xHeII[0] = x1
+        xHeIII[0] = x2
         xe[0] = xe0 + 0.25 * self.cp.YHe / (1.0 - self.cp.YHe) * (x1 + 2.0 * x2)
         barssc0 = 9.1820e-14
         barssc = barssc0 * (1.0 - 0.75 * self.cp.YHe + (1.0 - self.cp.YHe) * xe[0])
@@ -167,9 +167,9 @@ class thermal_history:
 
             xe[i] = xe0 + 0.25 * self.cp.YHe / (1.0 - self.cp.YHe) * (x1 + 2.0 * x2)
 
-            xH[i] = xe0
-            xHeI[i] = x1
-            xHeII[i] = x2
+            xHII[i] = xe0
+            xHeII[i] = x1
+            xHeIII[i] = x2
 
             # ... baryon sound speed squared (over c^2)
             # double adotoa=adot/a;
@@ -182,7 +182,7 @@ class thermal_history:
             tau0 = tau
             adot0 = adot
 
-        return ttau, tb, cs2, xe, xH, xHeI, xHeII
+        return ttau, tb, cs2, xe, xHII, xHeII, xHeIII
 
     def evaluate_at_tau(self, tau):
         tempb = np.interp(tau, self.tau, self.tb)
@@ -194,4 +194,4 @@ class thermal_history:
     def __init__(self, *, taumin: float, taumax: float, cp: cosmo, N: int):
         self.cp = cp
 
-        self.tau, self.tb, self.cs2, self.xe, self.xH, self.xHeI, self.xHeII = self.compute(taumin, taumax, N)
+        self.tau, self.tb, self.cs2, self.xe, self.xHII, self.xHeII, self.xHeIII = self.compute(taumin, taumax, N)
