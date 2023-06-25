@@ -9,7 +9,6 @@ class thermal_history:
     def ionize(self, tempb: float, a: float, adot: float, dtau: float, xe: float) -> float:
         # ... switch for fully implicit (switch=1.0) or semi implicit (switch=0.5);
         iswitch = 0.5
-
         tion = 1.5789e5  # ionization temperature
         beta0 = 43.082  # ionizatio coefficient (?)
         dec2g = 8.468e14  # two photon decay rate (in 1/Mpc)
@@ -29,8 +28,8 @@ class thermal_history:
             cpeebles = (1.0 + cp1) / (1.0 + cp1 + cp2)
         # ... integrate dxe=bb*(1-xe)-aa*xe*xe by averaging rhs at current tau
         # ... (fraction 1-iswitch) and future tau (fraction iswitch).
-        aa = a * dtau * alpha * cpeebles
-        bb = a * dtau * beta * cpeebles
+        aa = a * dtau * alpha * cpeebles 
+        bb = a * dtau * beta * cpeebles 
         b1 = 1.0 + iswitch * bb
         bbxe = bb + xe - (1.0 - iswitch) * (bb * xe + aa * xe * xe)
         rat = iswitch * aa * bbxe / (b1 * b1)
@@ -120,7 +119,7 @@ class thermal_history:
         ttau[0] = tau0
 
         tau_neglect_rad = -1.0
-        a_neglect_rad = 10.0 * (3.0 * self.cp.grhor + self.cp.grhog) / self.cp.grhom
+        a_neglect_rad = 10.0 * (self.cp.grhor + self.cp.grhog) / self.cp.grhom
 
         for i in range(1, nthermo):
             tau = taumin * np.exp(i * dlntau)
@@ -133,7 +132,7 @@ class thermal_history:
 
             grho = (
                 self.cp.grhom * self.cp.Omegam / a
-                + (3.0 * self.cp.grhor + self.cp.grhog) / a**2
+                + (self.cp.grhor + self.cp.grhog) / a**2
                 + self.cp.grhom * self.cp.OmegaL * a**2
             )
             adot = np.sqrt(grho / 3.0) * a

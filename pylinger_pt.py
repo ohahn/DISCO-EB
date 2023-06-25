@@ -55,21 +55,21 @@ class pt_synchronous:
         # ... compute expansion rate
         grho = (
             self.cp.grhom * self.cp.Omegam / a
-            + (self.cp.grhog + 3.0 * self.cp.grhor) / a**2
+            + (self.cp.grhog + self.cp.grhor) / a**2
             + self.cp.grhom * self.cp.OmegaL * a**2
         )
         adotoa = np.sqrt(grho / 3.0)
 
         f[:, 0] = adotoa * a
 
-        gpres = ((self.cp.grhog + 3.0 * self.cp.grhor) / 3.0) / a**2 - self.cp.grhom * self.cp.OmegaL * a**2
+        gpres = ((self.cp.grhog + self.cp.grhor) / 3.0) / a**2 - self.cp.grhom * self.cp.OmegaL * a**2
 
         # ... evaluate metric perturbations
         dgrho = (
             self.cp.grhom * (self.cp.Omegac * deltac + self.cp.Omegab * deltab) / a
-            + (self.cp.grhog * deltag + self.cp.grhor * 3.0 * deltar) / a**2
+            + (self.cp.grhog * deltag + self.cp.grhor * deltar) / a**2
         )
-        dgpres = (self.cp.grhog * deltag + self.cp.grhor * 3.0 * deltar) / a**2 / 3.0
+        dgpres = (self.cp.grhog * deltag + self.cp.grhor * deltar) / a**2 / 3.0
 
         dahdotdtau = -(dgrho + 3.0 * dgpres) * a
         f[:, 1] = dahdotdtau
@@ -79,12 +79,12 @@ class pt_synchronous:
 
         dgtheta = (
             self.cp.grhom * (self.cp.Omegac * thetac + self.cp.Omegab * thetab) / a
-            + 4.0 / 3.0 * (self.cp.grhog * thetag + 3.0 * self.cp.grhor * thetar) / a**2
+            + 4.0 / 3.0 * (self.cp.grhog * thetag + self.cp.grhor * thetar) / a**2
         )
         etadot = 0.5 * dgtheta / self.ak**2
         f[:, 2] = etadot
 
-        dgshear = 4.0 / 3.0 * (self.cp.grhog * shearg + 3.0 * self.cp.grhor * shearr) / a**2
+        dgshear = 4.0 / 3.0 * (self.cp.grhog * shearg + self.cp.grhor * shearr) / a**2
 
         # ... cdm equations of motion
         deltacdot = -thetac - 0.5 * hdot
@@ -98,9 +98,9 @@ class pt_synchronous:
         # ... need photon perturbation for first-order correction to tightly-coupled baryon-photon approx.
         deltagdot = 4.0 / 3.0 * (-thetag - 0.5 * hdot)
         drag = opac * (thetag - thetab)
-        thetabdot = 1.0
 
-        if tempb < 2.0e4:
+
+        if tempb < 1.0e4:
             # ... treat baryons and photons as uncoupled
             thetabdot = -adotoa * thetab + self.ak**2 * cs2 * deltab + pb43 * drag
         else:
@@ -129,7 +129,7 @@ class pt_synchronous:
         )
         f[:, 8] = thetagdot
 
-        if tempb < 2.0e5:
+        if tempb < 1.0e4:
             # ... treat baryons and photons as uncoupled
             f[:, 9] = (
                 8.0 / 15.0 * thetag
@@ -152,11 +152,10 @@ class pt_synchronous:
             )
             for i in range(2, self.lmax - 1):
                 f[:, 8 + i] = (
-                    self.ak * self.denl[i] * ((i + 1) * y[:, 7 + i] - (i + 2) * y[:, 9 + i]) - opac * y[:, 8 + i]
+                    self.ak * (1 / (2 * i + 2)) * ((i + 1) * y[:, 7 + i] - (i + 2) * y[:, 9 + i]) - opac * y[:, 8 + i]
                 )
                 f[:, 9 + self.lmax + i] = (
-                    self.ak * self.denl[i] * ((i + 1) * y[:, 8 + self.lmax + i] - (i + 2) * y[:, 10 + self.lmax + i])
-                    - opac * y[:, 9 + self.lmax + i]
+                    self.ak * (1 / (2 * i + 2)) * ((i + 1) * y[:, 8 + self.lmax + i] - (i + 2) * y[:, 10 + self.lmax + i]) - opac * y[:, 9 + self.lmax + i]
                 )
 
         else:
@@ -188,12 +187,31 @@ class pt_synchronous:
         )
         for l in range(2, self.lmax - 1):
             f[:, 10 + 2 * self.lmax + l] = (
-                self.ak
-                * self.denl[l]
+                self.ak / (2 * l + 2)
                 * ((l + 1) * y[:, 9 + 2 * self.lmax + l] - (l + 2) * y[:, 11 + 2 * self.lmax + l])
             )
         # ... truncate moment expansion
         f[:, 9 + 3 * self.lmax] = self.ak * y[:, 8 + 3 * self.lmax] - (self.lmax + 1) / tau * y[:, 9 + 3 * self.lmax]
+
+        # ... Massive neutrino equations of motion
+        # if self.nmassive > 0:
+        #     dq = self.qmax / self.nqmax
+        #     for iq in range(self.nqmax):
+        #         q = (iq + 1) * dq
+        #         dlfdlq = -q / (1.0+np.exp(-q))
+        #         aq = a * amnu / q
+        #         v = 1.0 / np.sqrt(1.0 + aq**2)
+        #         akv = self.ak * v
+        #         akov = self.ak / v
+        #         ind = iq0 + iq - 1
+        #         f[:,ind-1] = -akv * y[:,ind+nqmax-1] + hdot * dlfdlq / 6
+        #         ind = iq1 + iq - 1
+        #         f[:,ind-1] = akv * (y[:,ind-nqmax-1] -2*y[:,ind+nqmax-1]) / 3
+        #         ind = iq2 + iq - 1
+        #         f[:,ind-1] = akv*(2*y[:,ind-nqmax-1]-3*y[:,ind+nqmax-1])/5 - (hdot/15.+2/5*etadot)*dlfdlq
+        #         for l in range(2,self.lmaxnu-1):
+        #             ind = 10+3*lmax+iq+l*nqmax
+        #             f[:,ind-1] = akv*self.denl[l]*(l*y[:,ind-nqmax-1]-(l+1)*y[:,ind+nqmax-1])
 
         return f.flatten()
 
@@ -205,16 +223,16 @@ class pt_synchronous:
 
         grho = (
             self.cp.grhom * self.cp.Omegam / a
-            + (self.cp.grhog + 3.0 * self.cp.grhor) / a2
+            + (self.cp.grhog + self.cp.grhor) / a2
             + self.cp.grhom * self.cp.OmegaL * a2
         )
         adotoa = np.sqrt(grho / 3.0)
-        gpres = ((self.cp.grhog + 3.0 * self.cp.grhor) / 3.0) / a2 - self.cp.grhom * self.cp.OmegaL * a2
+        gpres = ((self.cp.grhog + self.cp.grhor) / 3.0) / a2 - self.cp.grhom * self.cp.OmegaL * a2
         s = grho + gpres
-        fracnu = self.cp.grhor * 4.0 / 3.0 * (3.0) / a2 / s
+        fracnu = self.cp.grhor * 4.0 / 3.0 / a2 / s
 
         # ... use yrad=rho_matter/rho_rad to correct initial conditions for matter+radiation
-        yrad = self.cp.grhom * self.cp.Omegam * a / (self.cp.grhog + 3.0 * self.cp.grhor)
+        yrad = self.cp.grhom * self.cp.Omegam * a / (self.cp.grhog + self.cp.grhor)
 
         # .. isentropic ("adiabatic") initial conditions
         psi = -1.0
@@ -273,6 +291,7 @@ class pt_synchronous:
         self.cp = cp
         self.th = th
 
+
     def compute(
         self, *, kmodes: np.ndarray, aexp_out: np.ndarray, rtol: float = 1e-3, atol: float = 1e-4
     ) -> tuple[np.ndarray, np.ndarray]:
@@ -285,10 +304,13 @@ class pt_synchronous:
         self.ak = np.copy(kmodes)
         self.akmax = np.max(kmodes)
 
-        self.lmax = np.minimum(10, int(1.5 * self.akmax * tau_max + 10.0))
-        self.denl = 1 / (2 * np.arange(1, self.lmax + 1) + 1)
+        self.lmax = np.minimum(10, int(1.5 * self.akmax * tau_max + 10.0)) # check in CLASS!
+        self.lmaxnu = 64 # 50 in linger_syn, check in CLASS!
+        # self.iq0=11+3*self.lmax
+        # self.iq1=self.iq0+self.nqmax
+        # self.iq2=self.iq1+self.nqmax
 
-        self.nvar = 7 + 3 * (self.lmax + 1)
+        self.nvar = 7 + 3 * (self.lmax + 1) #+ nqmax * (self.lmaxnu + 1)
         self.nmodes = self.ak.shape[0]
 
         y0 = self.adiabatic_ics(tau_start)
