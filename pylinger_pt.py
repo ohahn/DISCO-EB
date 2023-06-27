@@ -53,23 +53,40 @@ class pt_synchronous:
         pb43 = 4.0 / 3.0 * photbar
 
         # ... compute expansion rate
+        # grho = (
+        #     self.cp.grhom * self.cp.Omegam / a
+        #     + (self.cp.grhog + self.cp.grhor) / a**2
+        #     + self.cp.grhom * self.cp.OmegaL * a**2
+        # )
+        # rhonu = self.cp.rhonu_sp(a)
+        rhonu = np.interp(a, self.cp.a, self.cp.rhonu)
+        # pnu   = self.cp.pnu_sp(a)
+        pnu = np.interp(a, self.cp.a, self.cp.pnu)
         grho = (
-            self.cp.grhom * self.cp.Omegam / a
-            + (self.cp.grhog + self.cp.grhor) / a**2
-            + self.cp.grhom * self.cp.OmegaL * a**2
+            self.cp.grhom * self.cp.Omegam / a 
+            + (self.cp.grhog + self.cp.grhor*(self.cp.Neff+self.cp.Nmnu*rhonu)) / a**2
+            + self.cp.grhom * self.cp.OmegaL * a**2 
+            + self.cp.grhom * self.cp.Omegak
         )
         adotoa = np.sqrt(grho / 3.0)
 
         f[:, 0] = adotoa * a
 
-        gpres = ((self.cp.grhog + self.cp.grhor) / 3.0) / a**2 - self.cp.grhom * self.cp.OmegaL * a**2
-
+        # gpres = (
+        #     ((self.cp.grhog + self.cp.grhor) / 3.0) / a**2 
+        #     - self.cp.grhom * self.cp.OmegaL * a**2
+        # )
+        gpres = (
+            ((self.cp.grhog + self.cp.grhor*self.cp.Neff) / 3.0
+             + self.cp.grhor*self.cp.Nmnu*pnu) / a**2
+             - self.cp.grhom * self.cp.OmegaL * a**2
+        )
         # ... evaluate metric perturbations
         dgrho = (
             self.cp.grhom * (self.cp.Omegac * deltac + self.cp.Omegab * deltab) / a
-            + (self.cp.grhog * deltag + self.cp.grhor * deltar) / a**2
+            + (self.cp.grhog * deltag + 3*self.cp.grhor * deltar) / a**2
         )
-        dgpres = (self.cp.grhog * deltag + self.cp.grhor * deltar) / a**2 / 3.0
+        dgpres = (self.cp.grhog * deltag + 3*self.cp.grhor * deltar) / a**2 / 3.0
 
         dahdotdtau = -(dgrho + 3.0 * dgpres) * a
         f[:, 1] = dahdotdtau
@@ -79,12 +96,12 @@ class pt_synchronous:
 
         dgtheta = (
             self.cp.grhom * (self.cp.Omegac * thetac + self.cp.Omegab * thetab) / a
-            + 4.0 / 3.0 * (self.cp.grhog * thetag + self.cp.grhor * thetar) / a**2
+            + 4.0 / 3.0 * (self.cp.grhog * thetag + 3*self.cp.grhor * thetar) / a**2
         )
         etadot = 0.5 * dgtheta / self.ak**2
         f[:, 2] = etadot
 
-        dgshear = 4.0 / 3.0 * (self.cp.grhog * shearg + self.cp.grhor * shearr) / a**2
+        dgshear = 4.0 / 3.0 * (self.cp.grhog * shearg + 3*self.cp.grhor * shearr) / a**2
 
         # ... cdm equations of motion
         deltacdot = -thetac - 0.5 * hdot
@@ -221,18 +238,27 @@ class pt_synchronous:
         a = tau * self.cp.adotrad
         a2 = a**2
 
+        rhonu = np.interp(a, self.cp.a, self.cp.rhonu)
+        pnu = np.interp(a, self.cp.a, self.cp.pnu)
         grho = (
-            self.cp.grhom * self.cp.Omegam / a
-            + (self.cp.grhog + self.cp.grhor) / a2
-            + self.cp.grhom * self.cp.OmegaL * a2
+            self.cp.grhom * self.cp.Omegam / a 
+            + (self.cp.grhog + self.cp.grhor*(self.cp.Neff+self.cp.Nmnu*rhonu)) / a**2
+            + self.cp.grhom * self.cp.OmegaL * a**2 
+            + self.cp.grhom * self.cp.Omegak
+        )
+        gpres = (
+            ((self.cp.grhog + self.cp.grhor*self.cp.Neff) / 3.0
+             + self.cp.grhor*self.cp.Nmnu*pnu) / a**2
+             - self.cp.grhom * self.cp.OmegaL * a**2
         )
         adotoa = np.sqrt(grho / 3.0)
-        gpres = ((self.cp.grhog + self.cp.grhor) / 3.0) / a2 - self.cp.grhom * self.cp.OmegaL * a2
+
         s = grho + gpres
-        fracnu = self.cp.grhor * 4.0 / 3.0 / a2 / s
+
+        fracnu = self.cp.grhor * (self.cp.Neff+self.cp.Nmnu) * 4.0 / 3.0 / a2 / s
 
         # ... use yrad=rho_matter/rho_rad to correct initial conditions for matter+radiation
-        yrad = self.cp.grhom * self.cp.Omegam * a / (self.cp.grhog + self.cp.grhor)
+        yrad = self.cp.grhom * self.cp.Omegam * a / (self.cp.grhog + self.cp.grhor*(self.cp.Neff + self.cp.Nmnu*rhonu))
 
         # .. isentropic ("adiabatic") initial conditions
         psi = -1.0

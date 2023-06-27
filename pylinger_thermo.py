@@ -21,11 +21,11 @@ class thermal_history:
         alpha = alpha0 / np.sqrt(tempb) * phi2 / a**3
         beta = tempb * phi2 * np.exp(beta0 - tion / tempb)
         # ... Peebles' correction factor
-        cpeebles = 1.0
+        cpeebles = 1.14 #1.0
         if tempb >= 200.0:
             cp1 = crec * dec2g * (1.0 - xe) / (a * adot)
             cp2 = crec * tempb * phi2 * np.exp(beta0 - 0.25 * tion / tempb) * (1.0 - xe) / (a * adot)
-            cpeebles = (1.0 + cp1) / (1.0 + cp1 + cp2)
+            cpeebles = (1.0 + cp1) / (1.0 + cp1 + cp2) *1.14
         # ... integrate dxe=bb*(1-xe)-aa*xe*xe by averaging rhs at current tau
         # ... (fraction 1-iswitch) and future tau (fraction iswitch).
         aa = a * dtau * alpha * cpeebles 
