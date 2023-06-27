@@ -4,6 +4,7 @@ from scipy.integrate import solve_ivp
 import jax
 import jax.numpy as jnp
 import jax_cosmo.scipy.interpolate as jaxinterp
+from diffrax import diffeqsolve, Kvaerno3, Kvaerno4, Kvaerno5, ODETerm, SaveAt, PIDController
 from functools import partial
 
 @jax.jit
@@ -44,7 +45,7 @@ def ninu1( a : float, amnu: float, nq : int = 1000, qmax : float = 30.) -> tuple
     rhonu = (rhonu / dq + dum1[-1] / dq) / const
     pnu = (pnu / dq + dum2[-1] / dq) / const / 3
     
-    return rhonu, pnu
+    return rhonu[0], pnu[0]
 
 @jax.jit
 def nu_perturb( a : float, amnu: float, psi0, psi1, psi2, nq : int = 1000, qmax : float = 30.):
@@ -129,7 +130,7 @@ def d2tauda2(a, tau, cosmo_params):
 
 class cosmo:
 
-    def __init__(self, *, Omegam: float, Omegab: float, OmegaL: float, H0: float, Tcmb: float, YHe: float, Neff: float, Nmnu: int = 0, mnu: float = 0.0):
+    def __init__(self, *, Omegam: float, Omegab: float, OmegaL: float, H0: float, Tcmb: float, YHe: float, Neff: float, Nmnu: int = 0, mnu: float = 0.0, rtol: float = 1e-5, atol: float = 1e-5, order: int = 5):
         self.Omegam = Omegam
         self.Omegab = Omegab
         self.OmegaL = OmegaL
@@ -155,13 +156,15 @@ class cosmo:
         # Compute the scale factor
         amin = 1e-9
         amax = 1.1
-        self.a = np.geomspace(amin, amax, 1000)
+        self.a = jnp.geomspace(amin, amax, 1000)
 
         # Compute the neutrino density and pressure
-        self.rhonu = np.zeros_like(self.a)
-        self.pnu = np.zeros_like(self.a)
+        self.rhonu = jnp.zeros_like(self.a)
+        self.pnu = jnp.zeros_like(self.a)
         for i in range(len(self.a)):
-            self.rhonu[i], self.pnu[i] = ninu1(self.a[i], self.amnu )
+            rhonu, pnu = ninu1(self.a[i], self.amnu )
+            self.rhonu = self.rhonu.at[i].set(rhonu)
+            self.pnu = self.pnu.at[i].set(pnu)
 
         self.rhonu_sp = jaxinterp.InterpolatedUnivariateSpline(self.a, self.rhonu)
         self.pnu_sp = jaxinterp.InterpolatedUnivariateSpline(self.a, self.pnu)
@@ -174,13 +177,28 @@ class cosmo:
         self.dp1 = lambda a : self.p1.derivative(a)
 
         # Compute cosmic time
+        term = ODETerm(dtauda)
+        if order == 5:
+            solver = Kvaerno5()
+        elif order == 4:
+            solver = Kvaerno4()
+        elif order == 3:
+            solver = Kvaerno3()
+        else:
+            raise NotImplementedError
+        
         tauini = 0.0
-        sol = solve_ivp(lambda a,tau: dtauda(a,tau,self), \
-                        (amin, amax), [tauini], \
-                        jac= lambda a,tau: d2tauda2(a,tau,self), \
-                        method="BDF", t_eval=self.a)
+        saveat = SaveAt(ts=self.a)
+        stepsize_controller = PIDController(rtol=rtol, atol=atol)
+        sol = diffeqsolve(ODETerm(dtauda), solver, t0=amin, t1=amax, dt0=1e-5 * (self.a[1] - self.a[0]), y0=tauini, saveat=saveat,
+                       stepsize_controller=stepsize_controller, args=self)
+        self.tau = sol.ys
+        # sol = solve_ivp(lambda a,tau: dtauda(a,tau,self), \
+        #                 (amin, amax), [tauini], \
+        #                 jac= lambda a,tau: d2tauda2(a,tau,self), \
+        #                 method="BDF", t_eval=self.a)
         # self.a = np.array(sol["t"])
-        self.tau = np.array(sol["y"][0])
+        # self.tau = np.array(sol["y"][0])
 
     def get_tau(self, a: float):
         return np.interp(a, self.a, self.tau)
