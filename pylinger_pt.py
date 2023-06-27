@@ -2,7 +2,7 @@ import numpy as np
 
 import jax.numpy as jnp
 
-from pylinger_cosmo import cosmo, nu_perturb
+from pylinger_cosmo import cosmo, nu_perturb_jax, nu_perturb_numpy
 from pylinger_thermo import thermal_history
 
 from scipy.integrate import solve_ivp
@@ -63,9 +63,9 @@ def model_synchronous(tau, yin, params) -> np.ndarray:
     # pnu   = params.cp.pnu_sp(a)
     pnu = np.interp(a, params.cp.a, params.cp.pnu)
     grho = (
-        params.cp.grhom * params.cp.Omegam / a 
-        + (params.cp.grhog + params.cp.grhor*(params.cp.Neff+params.cp.Nmnu*rhonu)) / a**2
-        + params.cp.grhom * params.cp.OmegaL * a**2 
+        params.cp.grhom * params.cp.Omegam / a
+        + (params.cp.grhog + params.cp.grhor * (params.cp.Neff + params.cp.Nmnu * rhonu)) / a**2
+        + params.cp.grhom * params.cp.OmegaL * a**2
         + params.cp.grhom * params.cp.Omegak
     )
     adotoa = np.sqrt(grho / 3.0)
@@ -73,20 +73,34 @@ def model_synchronous(tau, yin, params) -> np.ndarray:
     f[:, 0] = adotoa * a
 
     # gpres = (
-    #     ((params.cp.grhog + params.cp.grhor) / 3.0) / a**2 
+    #     ((params.cp.grhog + params.cp.grhor) / 3.0) / a**2
     #     - params.cp.grhom * params.cp.OmegaL * a**2
     # )
     gpres = (
-        ((params.cp.grhog + params.cp.grhor*params.cp.Neff) / 3.0
-            + params.cp.grhor*params.cp.Nmnu*pnu) / a**2
-            - params.cp.grhom * params.cp.OmegaL * a**2
-    )
+        (params.cp.grhog + params.cp.grhor * params.cp.Neff) / 3.0 + params.cp.grhor * params.cp.Nmnu * pnu
+    ) / a**2 - params.cp.grhom * params.cp.OmegaL * a**2
     # ... evaluate metric perturbations
+    drhonu = np.zeros_like(params.ak)
+    dpnu = np.zeros_like(params.ak)
+    fnu = np.zeros_like(params.ak)
+    shearnu = np.zeros_like(params.ak)
+
+    for i in range(len(params.ak)):
+        drhonu[i], dpnu[i], fnu[i], shearnu[i] = nu_perturb_numpy(
+            a[0],
+            params.cp.amnu,
+            y[i, params.iq0 : params.iq1],
+            y[i, params.iq1 : params.iq2],
+            y[i, params.iq2 : params.iq3],
+        )
+
     dgrho = (
         params.cp.grhom * (params.cp.Omegac * deltac + params.cp.Omegab * deltab) / a
-        + (params.cp.grhog * deltag + 3*params.cp.grhor * deltar) / a**2
+        + (params.cp.grhog * deltag + params.cp.grhor * (params.cp.Neff * deltar + params.cp.Nmnu * drhonu)) / a**2
     )
-    dgpres = (params.cp.grhog * deltag + 3*params.cp.grhor * deltar) / a**2 / 3.0
+    dgpres = (
+        params.cp.grhog * deltag + params.cp.grhor * params.cp.Neff * deltar
+    ) / a**2 / 3.0 + params.cp.grhor * params.cp.Nmnu * dpnu / a**2
 
     dahdotdtau = -(dgrho + 3.0 * dgpres) * a
     f[:, 1] = dahdotdtau
@@ -96,12 +110,16 @@ def model_synchronous(tau, yin, params) -> np.ndarray:
 
     dgtheta = (
         params.cp.grhom * (params.cp.Omegac * thetac + params.cp.Omegab * thetab) / a
-        + 4.0 / 3.0 * (params.cp.grhog * thetag + 3*params.cp.grhor * thetar) / a**2
+        + 4.0 / 3.0 * (params.cp.grhog * thetag + params.cp.Neff * params.cp.grhor * thetar) / a**2
+        + params.cp.Nmnu * params.cp.grhor * params.ak * fnu / a**2
     )
     etadot = 0.5 * dgtheta / params.ak**2
     f[:, 2] = etadot
 
-    dgshear = 4.0 / 3.0 * (params.cp.grhog * shearg + 3*params.cp.grhor * shearr) / a**2
+    dgshear = (
+        4.0 / 3.0 * (params.cp.grhog * shearg + params.cp.Neff * params.cp.grhor * shearr) / a**2
+        + params.cp.Nmnu * params.cp.grhor * shearnu / a**2
+    )
 
     # ... cdm equations of motion
     deltacdot = -thetac - 0.5 * hdot
@@ -115,7 +133,6 @@ def model_synchronous(tau, yin, params) -> np.ndarray:
     # ... need photon perturbation for first-order correction to tightly-coupled baryon-photon approx.
     deltagdot = 4.0 / 3.0 * (-thetag - 0.5 * hdot)
     drag = opac * (thetag - thetab)
-
 
     if tempb < 1.0e4:
         # ... treat baryons and photons as uncoupled
@@ -172,7 +189,10 @@ def model_synchronous(tau, yin, params) -> np.ndarray:
                 params.ak * (1 / (2 * i + 2)) * ((i + 1) * y[:, 7 + i] - (i + 2) * y[:, 9 + i]) - opac * y[:, 8 + i]
             )
             f[:, 9 + params.lmax + i] = (
-                params.ak * (1 / (2 * i + 2)) * ((i + 1) * y[:, 8 + params.lmax + i] - (i + 2) * y[:, 10 + params.lmax + i]) - opac * y[:, 9 + params.lmax + i]
+                params.ak
+                * (1 / (2 * i + 2))
+                * ((i + 1) * y[:, 8 + params.lmax + i] - (i + 2) * y[:, 10 + params.lmax + i])
+                - opac * y[:, 9 + params.lmax + i]
             )
 
     else:
@@ -186,7 +206,9 @@ def model_synchronous(tau, yin, params) -> np.ndarray:
 
     # ... truncate moment expansion
     f[:, 7 + params.lmax] = (
-        params.ak * y[:, 6 + params.lmax] - (params.lmax + 1) / tau * y[:, 7 + params.lmax] - opac * y[:, 7 + params.lmax]
+        params.ak * y[:, 6 + params.lmax]
+        - (params.lmax + 1) / tau * y[:, 7 + params.lmax]
+        - opac * y[:, 7 + params.lmax]
     )
     f[:, 8 + 2 * params.lmax] = (
         params.ak * y[:, 7 + 2 * params.lmax]
@@ -204,73 +226,61 @@ def model_synchronous(tau, yin, params) -> np.ndarray:
     )
     for l in range(2, params.lmax - 1):
         f[:, 10 + 2 * params.lmax + l] = (
-            params.ak / (2 * l + 2)
+            params.ak
+            / (2 * l + 2)
             * ((l + 1) * y[:, 9 + 2 * params.lmax + l] - (l + 2) * y[:, 11 + 2 * params.lmax + l])
         )
     # ... truncate moment expansion
-    f[:, 9 + 3 * params.lmax] = params.ak * y[:, 8 + 3 * params.lmax] - (params.lmax + 1) / tau * y[:, 9 + 3 * params.lmax]
+    f[:, 9 + 3 * params.lmax] = (
+        params.ak * y[:, 8 + 3 * params.lmax] - (params.lmax + 1) / tau * y[:, 9 + 3 * params.lmax]
+    )
 
     # ... Massive neutrino equations of motion
     if params.cp.Nmnu > 0:
-        q  = (jnp.arange(0,params.nqmax0) - 0.5)  # so dq == 1
-        q.at[0].set(0.0)
+        # q  = (jnp.arange(0,params.nqmax) - 0.5)  # so dq == 1
+        # q.at[0].set(0.0)
+        q = np.arange(1, params.nqmax + 1) - 0.5  # so dq == 1
         aq = a[0] * params.cp.amnu / q
-        v = 1 / jnp.sqrt(1 + aq**2)
-        dlfdlq = -q/(1.0+jnp.exp(q)) # derivative of the Fermi-Dirac distribution
+        v = 1 / np.sqrt(1 + aq**2)
+        dlfdlq = -q / (1.0 + np.exp(-q))  # derivative of the Fermi-Dirac distribution
 
-        f[:, params.iq0:params.iq1] = -params.ak[:,None] * v[None,:] + hdot[:,None] * dlfdlq / 6.0
-        f[:, params.iq1:params.iq2] = params.ak[:,None] * v[None,:] * (y[:, params.iq0:params.iq1] - 2.0 * y[:, params.iq2:params.iq3]) / 3.0
-        f[:, params.iq2:params.iq3] = params.ak[:,None] * v[None,:] * (2 * y[:, params.iq1:params.iq2] - 3 * y[:, params.iq3:params.iq4]) / 5.0 - (hdot[:,None]/15 +2/5*etadot[:,None]) * dlfdlq
+        f[:, params.iq0 : params.iq1] = (
+            -params.ak[:, None] * v[None, :] * y[:, params.iq0 : params.iq1] + hdot[:, None] * dlfdlq / 6.0
+        )
+        f[:, params.iq1 : params.iq2] = (
+            params.ak[:, None]
+            * v[None, :]
+            * (y[:, params.iq0 : params.iq1] - 2.0 * y[:, params.iq2 : params.iq3])
+            / 3.0
+        )
+        f[:, params.iq2 : params.iq3] = (
+            params.ak[:, None]
+            * v[None, :]
+            * (2 * y[:, params.iq1 : params.iq2] - 3 * y[:, params.iq3 : params.iq4]) / 5.0
+            - (hdot[:, None] / 15 + 2 / 5 * etadot[:, None]) * dlfdlq
+        )
 
         for l in range(3, params.lmaxnu - 1):
-            f[:, params.iq0+l*params.nqmax:params.iq0+(l+1)*params.nqmax] = params.ak[:,None] * v[None,:] / (2*l+1) * (l*y[:, params.iq0+(l-1)*params.nqmax:params.iq0+(l)*params.nqmax] - (l+1)*y[:, params.iq0+(l+1)*params.nqmax:params.iq0+(l+2)*params.nqmax]) 
+            f[:, params.iq0 + l * params.nqmax : params.iq0 + (l + 1) * params.nqmax] = (
+                params.ak[:, None]
+                * v[None, :]
+                / (2 * l + 1)
+                * (
+                    l * y[:, params.iq0 + (l - 1) * params.nqmax : params.iq0 + (l) * params.nqmax]
+                    - (l + 1) * y[:, params.iq0 + (l + 1) * params.nqmax : params.iq0 + (l + 2) * params.nqmax]
+                )
+            )
 
         # Truncate moment expansion.
-        f[:,-params.nqmax:] = params.ak[:,None] * v[None,:] * y[:,-2*params.nqmax:-params.nqmax] - (params.lmaxnu+1)/tau*y[:,-params.nqmax:]
-
-# ind=10+2*lmax+lmaxnr+i+lmaxnu*nqmax
-# yprime(ind)=akv(i)*y(ind-nqmax)-(lmaxnu+1)/tau*y(ind)
-# 30	continue
-# 	  do 50 l=3,lmaxnu-1
-# 	    do 40 i=1,nqmax
-# 	    ind=10+2*lmax+lmaxnr+i+l*nqmax
-#           yprime(ind)=akv(i)*denl(l)*(l*y(ind-nqmax)-(l+1)*y(ind+nqmax))
-# 40	  continue
-# 50	continue
-
-
-        
-        # 0.25 * dlfdlq[None,:] * deltan[:,None]
-        # y[:, params.iq1:params.iq2] = dlfdlq[None,:] * thetan[:,None] / v[None,:] / params.ak[:,None]  / 3.0
-        # y[:, params.iq2:params.iq3] = 0.5 * dlfdlq[None,:] * shearn[:,None]
-        # y[:, params.iq3:] = 0.0
-    # for i in range(len(params.ak)):
-    #     drhonu, dpnu, fnu, shearnu = nu_perturb( a, params.cp.amnu, y[i,params.iq0], y[i,params.iq1], y[i,params.iq2])
-
-
-    # if params.nmassive > 0:
-    #     dq = params.qmax / params.nqmax
-    #     for iq in range(params.nqmax):
-    #         q = (iq + 1) * dq
-    #         dlfdlq = -q / (1.0+np.exp(-q))
-    #         aq = a * amnu / q
-    #         v = 1.0 / np.sqrt(1.0 + aq**2)
-    #         akv = params.ak * v
-    #         akov = params.ak / v
-    #         ind = iq0 + iq - 1
-    #         f[:,ind-1] = -akv * y[:,ind+nqmax-1] + hdot * dlfdlq / 6
-    #         ind = iq1 + iq - 1
-    #         f[:,ind-1] = akv * (y[:,ind-nqmax-1] -2*y[:,ind+nqmax-1]) / 3
-    #         ind = iq2 + iq - 1
-    #         f[:,ind-1] = akv*(2*y[:,ind-nqmax-1]-3*y[:,ind+nqmax-1])/5 - (hdot/15.+2/5*etadot)*dlfdlq
-    #         for l in range(2,params.lmaxnu-1):
-    #             ind = 10+3*lmax+iq+l*nqmax
-    #             f[:,ind-1] = akv*params.denl[l]*(l*y[:,ind-nqmax-1]-(l+1)*y[:,ind+nqmax-1])
+        f[:, -params.nqmax :] = (
+            params.ak[:, None] * v[None, :] * y[:, -2 * params.nqmax : -params.nqmax]
+            - (params.lmaxnu + 1) / tau * y[:, -params.nqmax :]
+        )
 
     return f.flatten()
 
 
-def adiabatic_ics(tau : float, params) -> np.ndarray:
+def adiabatic_ics(tau: float, params) -> np.ndarray:
     """Initial conditions for adiabatic perturbations"""
     y = np.zeros((params.nmodes, params.nvar))
     # a = params.cp.get_a(tau)
@@ -280,24 +290,27 @@ def adiabatic_ics(tau : float, params) -> np.ndarray:
     rhonu = np.interp(a, params.cp.a, params.cp.rhonu)
     pnu = np.interp(a, params.cp.a, params.cp.pnu)
     grho = (
-        params.cp.grhom * params.cp.Omegam / a 
-        + (params.cp.grhog + params.cp.grhor*(params.cp.Neff+params.cp.Nmnu*rhonu)) / a**2
-        + params.cp.grhom * params.cp.OmegaL * a**2 
+        params.cp.grhom * params.cp.Omegam / a
+        + (params.cp.grhog + params.cp.grhor * (params.cp.Neff + params.cp.Nmnu * rhonu)) / a**2
+        + params.cp.grhom * params.cp.OmegaL * a**2
         + params.cp.grhom * params.cp.Omegak
     )
     gpres = (
-        ((params.cp.grhog + params.cp.grhor*params.cp.Neff) / 3.0
-            + params.cp.grhor*params.cp.Nmnu*pnu) / a**2
-            - params.cp.grhom * params.cp.OmegaL * a**2
-    )
+        (params.cp.grhog + params.cp.grhor * params.cp.Neff) / 3.0 + params.cp.grhor * params.cp.Nmnu * pnu
+    ) / a**2 - params.cp.grhom * params.cp.OmegaL * a**2
     adotoa = np.sqrt(grho / 3.0)
 
     s = grho + gpres
 
-    fracnu = params.cp.grhor * (params.cp.Neff+params.cp.Nmnu) * 4.0 / 3.0 / a2 / s
+    fracnu = params.cp.grhor * (params.cp.Neff + params.cp.Nmnu) * 4.0 / 3.0 / a2 / s
 
     # ... use yrad=rho_matter/rho_rad to correct initial conditions for matter+radiation
-    yrad = params.cp.grhom * params.cp.Omegam * a / (params.cp.grhog + params.cp.grhor*(params.cp.Neff + params.cp.Nmnu*rhonu))
+    yrad = (
+        params.cp.grhom
+        * params.cp.Omegam
+        * a
+        / (params.cp.grhog + params.cp.grhor * (params.cp.Neff + params.cp.Nmnu * rhonu))
+    )
 
     # .. isentropic ("adiabatic") initial conditions
     psi = -1.0
@@ -321,7 +334,6 @@ def adiabatic_ics(tau : float, params) -> np.ndarray:
     shearr = 4.0 / 15.0 * params.ak**2 / s * psi * (1.0 + 7.0 / 36.0 * yrad)
     shearn = shearr
     ahdot = 2.0 * C * params.ak**2 * tau * a * (1.0 - 0.3 * yrad)
-
 
     # ... metric
     y[:, 0] = a
@@ -356,29 +368,25 @@ def adiabatic_ics(tau : float, params) -> np.ndarray:
 
     # ... massive neutrinos
     if params.cp.Nmnu > 0:
-        q  = (jnp.arange(0,params.nqmax0) - 0.5)  # so dq == 1
-        q.at[0].set(0.0)
+        q = jnp.arange(1, params.nqmax + 1) - 0.5  # so dq == 1
         aq = a * params.cp.amnu / q
         v = 1 / jnp.sqrt(1 + aq**2)
         akv = jnp.outer(params.ak, v)
-        dlfdlq = q/(1.0+jnp.exp(q))
-        y[:, params.iq0:params.iq1] = 0.25 * dlfdlq[None,:] * deltan[:,None]
-        y[:, params.iq1:params.iq2] = dlfdlq[None,:] * thetan[:,None] / v[None,:] / params.ak[:,None]  / 3.0
-        y[:, params.iq2:params.iq3] = 0.5 * dlfdlq[None,:] * shearn[:,None]
-        y[:, params.iq3:] = 0.0
+        dlfdlq = -q / (1.0 + jnp.exp(-q))
+        y[:, params.iq0 : params.iq1] = -0.25 * dlfdlq[None, :] * deltan[:, None]
+        y[:, params.iq1 : params.iq2] = -dlfdlq[None, :] * thetan[:, None] / v[None, :] / params.ak[:, None] / 3.0
+        y[:, params.iq2 : params.iq3] = -0.5 * dlfdlq[None, :] * shearn[:, None]
+        y[:, params.iq3 :] = 0.0
     # for i in range(len(params.ak)):
     #     drhonu, dpnu, fnu, shearnu = nu_perturb( a, params.cp.amnu, y[i,params.iq0], y[i,params.iq1], y[i,params.iq2])
 
-
     return y.flatten()
 
-class pt_synchronous:
-    
 
+class pt_synchronous:
     def __init__(self, *, cp: cosmo, th: thermal_history):
         self.cp = cp
         self.th = th
-
 
     def compute(
         self, *, kmodes: np.ndarray, aexp_out: np.ndarray, rtol: float = 1e-3, atol: float = 1e-4
@@ -393,27 +401,31 @@ class pt_synchronous:
         self.akmax = np.max(kmodes)
 
         # number of multipoles for photon and neutrino perturbations
-        self.lmax = np.minimum(10, int(1.5 * self.akmax * tau_max + 10.0)) # check in CLASS!
-        self.lmaxnu = 64 # 50 in linger_syn, check in CLASS!
-        self.nqmax0 = 15
-        self.iq0=11+3*self.lmax
-        self.iq1=self.iq0+self.nqmax0
-        self.iq2=self.iq1+self.nqmax0
-        self.iq3=self.iq2+self.nqmax0
-        self.iq4=self.iq3+self.nqmax0
-        
-        
+        self.lmax = np.minimum(10, int(1.5 * self.akmax * tau_max + 10.0))  # check in CLASS!
+        self.lmaxnu = 64  # 50 in linger_syn, check in CLASS!
+        self.nqmax = 15
+        self.iq0 = 11 + 3 * self.lmax
+        self.iq1 = self.iq0 + self.nqmax
+        self.iq2 = self.iq1 + self.nqmax
+        self.iq3 = self.iq2 + self.nqmax
+        self.iq4 = self.iq3 + self.nqmax
+
         # set up storage array
-        self.nvar = 7 + 3 * (self.lmax + 1) + self.nqmax0 * (self.lmaxnu + 1)
+        self.nvar = 7 + 3 * (self.lmax + 1) + self.nqmax * (self.lmaxnu + 1)
         self.nmodes = self.ak.shape[0]
 
         # set initial conditions
         y0 = adiabatic_ics(tau_start, self)
 
         # solve
-        sol = solve_ivp( lambda tau,y: model_synchronous(tau,y,self), \
-                        (tau_start, tau_max), y0, t_eval=tau_out, \
-                        rtol=rtol, atol=atol)
+        sol = solve_ivp(
+            lambda tau, y: model_synchronous(tau, y, self),
+            (tau_start, tau_max),
+            y0,
+            t_eval=tau_out,
+            rtol=rtol,
+            atol=atol,
+        )
 
         return np.array(sol["y"]).reshape((self.nmodes, self.nvar, self.nout)), np.array(sol["t"])
         # return y0.reshape((self.nmodes, self.nvar))

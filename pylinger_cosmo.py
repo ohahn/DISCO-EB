@@ -4,6 +4,7 @@ from scipy.integrate import solve_ivp
 import jax
 import jax.numpy as jnp
 import jax_cosmo.scipy.interpolate as jaxinterp
+import scipy.interpolate as scipyinterp
 from diffrax import diffeqsolve, Kvaerno3, Kvaerno4, Kvaerno5, ODETerm, SaveAt, PIDController
 from functools import partial
 
@@ -28,8 +29,8 @@ def ninu1( a : float, amnu: float, nq : int = 1000, qmax : float = 30.) -> tuple
     # q is the comoving momentum in units of k_B*T_nu0/c.
     # Integrate up to qmax and then use asymptotic expansion for remainder.
     dq   = qmax / nq
-    q    = dq * jnp.arange(0,nq+1)
-    aq   = a * amnu / (q+1e-8) # prevent division by zero
+    q    = dq * jnp.arange(1,nq+1)
+    aq   = a * amnu / q
     v    = 1 / jnp.sqrt(1 + aq**2)
     qdn  = dq * q**3 / (jnp.exp(q) + 1)
     dum1 = qdn / v
@@ -48,7 +49,7 @@ def ninu1( a : float, amnu: float, nq : int = 1000, qmax : float = 30.) -> tuple
     return rhonu[0], pnu[0]
 
 @jax.jit
-def nu_perturb( a : float, amnu: float, psi0, psi1, psi2, nq : int = 1000, qmax : float = 30.):
+def nu_perturb_jax( a : float, amnu: float, psi0, psi1, psi2, nq : int = 1000, qmax : float = 30.):
     """ Compute the perturbations of density, energy flux, pressure, and
         shear stress of one flavor of massive neutrinos, in units of the mean
         density of one flavor of massless neutrinos, by integrating over 
@@ -66,24 +67,25 @@ def nu_perturb( a : float, amnu: float, psi0, psi1, psi2, nq : int = 1000, qmax 
     Returns:
         _type_: drhonu, dpnu, fnu, shearnu
     """
-    nqmax0 = 15
+    nqmax0 = len(psi0)
     qmax0  = nqmax0 - 0.5
     # const = 7 * np.pi**4 / 120
     const = 5.682196976983475
 
-    g1 = jnp.zeros((nqmax0+1))
-    g2 = jnp.zeros((nqmax0+1))
-    g3 = jnp.zeros((nqmax0+1))
-    g4 = jnp.zeros((nqmax0+1))
-    q  = (jnp.arange(0,nqmax0+1) - 0.5)  # so dq == 1
-    q.at[0].set(0.0)
+    g1 = jnp.zeros((nqmax0))
+    g2 = jnp.zeros((nqmax0))
+    g3 = jnp.zeros((nqmax0))
+    g4 = jnp.zeros((nqmax0))
+    q  = (jnp.arange(1,nqmax0+1) - 0.5)  # so dq == 1
+    # q.at[0].set(0.0)
+
     aq = a * amnu / q
     v = 1 / jnp.sqrt(1 + aq**2)
     qdn = q**3 / (jnp.exp(q) + 1)
     g1 = qdn * psi0 / v
     g2 = qdn * psi0 * v
     g3 = qdn * psi1 
-    g4 = qdn * psi1 * v
+    g4 = qdn * psi2 * v
 
     g1_sp = jaxinterp.InterpolatedUnivariateSpline(q, g1)
     g01 = g1_sp.integral(0, qmax0)
@@ -92,6 +94,62 @@ def nu_perturb( a : float, amnu: float, psi0, psi1, psi2, nq : int = 1000, qmax 
     g3_sp = jaxinterp.InterpolatedUnivariateSpline(q, g3)
     g03 = g3_sp.integral(0, qmax0)
     g4_sp = jaxinterp.InterpolatedUnivariateSpline(q, g4)
+    g04 = g4_sp.integral(0, qmax0)
+
+    # Apply asymptotic corrrection for q>qmax0
+    drhonu = (g01 + g1[-1] * 2 / qmax) / const
+    dpnu = (g02 + g2[-1] * 2 / qmax) / const / 3
+    fnu = (g03 + g3[-1] * 2 / qmax) / const
+    shearnu = (g04 + g4[-1] * 2 / qmax) / const * 2 / 3
+
+    return drhonu, dpnu, fnu, shearnu
+
+
+def nu_perturb_numpy( a : float, amnu: float, psi0, psi1, psi2, nq : int = 1000, qmax : float = 30.):
+    """ Compute the perturbations of density, energy flux, pressure, and
+        shear stress of one flavor of massive neutrinos, in units of the mean
+        density of one flavor of massless neutrinos, by integrating over 
+        momentum.
+
+    Args:
+        a (float): scale factor
+        amnu (float): neutrino mass in units of neutrino temperature (m_nu*c**2/(k_B*T_nu0).
+        psi0 (_type_): 
+        psi1 (_type_): _description_
+        psi2 (_type_): _description_
+        nq (int, optional): _description_. Defaults to 1000.
+        qmax (float, optional): _description_. Defaults to 30..
+
+    Returns:
+        _type_: drhonu, dpnu, fnu, shearnu
+    """
+    nqmax0 = len(psi0)
+    qmax0  = nqmax0 - 0.5
+    # const = 7 * np.pi**4 / 120
+    const = 5.682196976983475
+
+    g1 = np.zeros((nqmax0))
+    g2 = np.zeros((nqmax0))
+    g3 = np.zeros((nqmax0))
+    g4 = np.zeros((nqmax0))
+    q  = (np.arange(1,nqmax0+1) - 0.5)  # so dq == 1
+    # q.at[0].set(0.0)
+
+    aq = a * amnu / q
+    v = 1 / np.sqrt(1 + aq**2)
+    qdn = q**3 / (np.exp(q) + 1)
+    g1 = qdn * psi0 / v
+    g2 = qdn * psi0 * v
+    g3 = qdn * psi1 
+    g4 = qdn * psi2 * v
+
+    g1_sp = scipyinterp.InterpolatedUnivariateSpline(q, g1)
+    g01 = g1_sp.integral(0, qmax0)
+    g2_sp = scipyinterp.InterpolatedUnivariateSpline(q, g2)
+    g02 = g2_sp.integral(0, qmax0)
+    g3_sp = scipyinterp.InterpolatedUnivariateSpline(q, g3)
+    g03 = g3_sp.integral(0, qmax0)
+    g4_sp = scipyinterp.InterpolatedUnivariateSpline(q, g4)
     g04 = g4_sp.integral(0, qmax0)
 
     # Apply asymptotic corrrection for q>qmax0
