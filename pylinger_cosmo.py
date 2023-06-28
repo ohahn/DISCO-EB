@@ -1,11 +1,16 @@
+import pylinger_thermo as pthermo
+
 import numpy as np
 from scipy.integrate import solve_ivp
 
 import jax
+# from jax import config
+# config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 import jax_cosmo.scipy.interpolate as jaxinterp
 import scipy.interpolate as scipyinterp
-from diffrax import diffeqsolve, Kvaerno3, Kvaerno4, Kvaerno5, ODETerm, SaveAt, PIDController
+from jax_cosmo.scipy.integrate import romb
+# from diffrax import diffeqsolve, Dopri5, Kvaerno3, Kvaerno4, Kvaerno5, ODETerm, SaveAt, PIDController
 from functools import partial
 
 @jax.jit
@@ -47,6 +52,47 @@ def ninu1( a : float, amnu: float, nq : int = 1000, qmax : float = 30.) -> tuple
     pnu = (pnu / dq + dum2[-1] / dq) / const / 3
     
     return rhonu[0], pnu[0]
+
+
+def ninu1_numoy( a : float, amnu: float, nq : int = 1000, qmax : float = 30.) -> tuple[float, float]:
+    """ computes the neutrino density and pressure of one flavour of massive neutrinos
+        in units of the mean density of one flavour of massless neutrinos
+
+    Args:
+        a (float): scale factor
+        amnu (float): neutrino mass in units of neutrino temperature (m_nu*c**2/(k_B*T_nu0).
+        nq (int, optional): number of integration points. Defaults to 1000.
+        qmax (float, optional): maximum momentum. Defaults to 30..
+
+    Returns:
+        tuple[float, float]: rho_nu/rho_nu0, p_nu/p_nu0
+    """
+
+    # const = 7 * np.pi**4 / 120
+    const = 5.682196976983475
+    
+    # q is the comoving momentum in units of k_B*T_nu0/c.
+    # Integrate up to qmax and then use asymptotic expansion for remainder.
+    dq   = qmax / nq
+    q    = dq * jnp.arange(1,nq+1)
+    aq   = a * amnu / q
+    v    = 1 / jnp.sqrt(1 + aq**2)
+    qdn  = dq * q**3 / (jnp.exp(q) + 1)
+    dum1 = qdn / v
+    dum2 = qdn * v
+    
+    rho_spline = scipyinterp.InterpolatedUnivariateSpline(q, dum1)
+    rhonu = rho_spline.integral(0, qmax)
+    p_spline = scipyinterp.InterpolatedUnivariateSpline(q, dum2)
+    pnu = p_spline.integral(0, qmax)
+
+    # Apply asymptotic corrrection for q>qmax and normalize by relativistic
+    # energy density.
+    rhonu = (rhonu / dq + dum1[-1] / dq) / const
+    pnu = (pnu / dq + dum2[-1] / dq) / const / 3
+    
+    return rhonu[0], pnu[0]
+
 
 @jax.jit
 def nu_perturb_jax( a : float, amnu: float, psi0, psi1, psi2, nq : int = 1000, qmax : float = 30.):
@@ -128,28 +174,29 @@ def nu_perturb_numpy( a : float, amnu: float, psi0, psi1, psi2, nq : int = 1000,
     # const = 7 * np.pi**4 / 120
     const = 5.682196976983475
 
-    g1 = np.zeros((nqmax0))
-    g2 = np.zeros((nqmax0))
-    g3 = np.zeros((nqmax0))
-    g4 = np.zeros((nqmax0))
+    g1 = np.zeros((nqmax0+1))
+    g2 = np.zeros((nqmax0+1))
+    g3 = np.zeros((nqmax0+1))
+    g4 = np.zeros((nqmax0+1))
     q  = (np.arange(1,nqmax0+1) - 0.5)  # so dq == 1
+    qq = np.arange(0,nqmax0+1)  # so dq == 1
     # q.at[0].set(0.0)
 
     aq = a * amnu / q
     v = 1 / np.sqrt(1 + aq**2)
     qdn = q**3 / (np.exp(q) + 1)
-    g1 = qdn * psi0 / v
-    g2 = qdn * psi0 * v
-    g3 = qdn * psi1 
-    g4 = qdn * psi2 * v
+    g1[1:] = qdn * psi0 / v
+    g2[1:] = qdn * psi0 * v
+    g3[1:] = qdn * psi1 
+    g4[1:] = qdn * psi2 * v
 
-    g1_sp = scipyinterp.InterpolatedUnivariateSpline(q, g1)
+    g1_sp = scipyinterp.InterpolatedUnivariateSpline(qq, g1)
     g01 = g1_sp.integral(0, qmax0)
-    g2_sp = scipyinterp.InterpolatedUnivariateSpline(q, g2)
+    g2_sp = scipyinterp.InterpolatedUnivariateSpline(qq, g2)
     g02 = g2_sp.integral(0, qmax0)
-    g3_sp = scipyinterp.InterpolatedUnivariateSpline(q, g3)
+    g3_sp = scipyinterp.InterpolatedUnivariateSpline(qq, g3)
     g03 = g3_sp.integral(0, qmax0)
-    g4_sp = scipyinterp.InterpolatedUnivariateSpline(q, g4)
+    g4_sp = scipyinterp.InterpolatedUnivariateSpline(qq, g4)
     g04 = g4_sp.integral(0, qmax0)
 
     # Apply asymptotic corrrection for q>qmax0
@@ -161,7 +208,7 @@ def nu_perturb_numpy( a : float, amnu: float, psi0, psi1, psi2, nq : int = 1000,
     return drhonu, dpnu, fnu, shearnu
 
 @partial(jax.jit, static_argnames=("cosmo_params",))
-def dtauda(a, tau, cosmo_params):
+def dtauda_(a, cosmo_params):
     rhonu = cosmo_params.rhonu_sp(a)
     """Derivative of conformal time with respect to scale factor"""
     grho2 = cosmo_params.grhom * cosmo_params.Omegam * a 
@@ -171,24 +218,13 @@ def dtauda(a, tau, cosmo_params):
     return jnp.sqrt(3.0 / grho2)
 
 @partial(jax.jit, static_argnames=("cosmo_params",))
-def d2tauda2(a, tau, cosmo_params):
-    """Second derivative of conformal time with respect to scale factor"""
-    jac = jnp.zeros((1, 1))
-    rhonu = cosmo_params.rhonu_sp(a)
-    grho2 = cosmo_params.grhom * cosmo_params.Omegam * a 
-    + (cosmo_params.grhog + cosmo_params.grhor*(cosmo_params.Neff+cosmo_params.Nmnu*rhonu)) 
-    + cosmo_params.grhom * cosmo_params.OmegaL * a**4 
-    + cosmo_params.grhom * cosmo_params.Omegak * a**2
-    jac.at[0, 0].set( -0.5 * (cosmo_params.grhom * (4 * a**3 * cosmo_params.OmegaL + cosmo_params.Omegam 
-                                                    + 2 * a * cosmo_params.Omegak) 
-                                                    + cosmo_params.grhor * cosmo_params.Nmnu * a * cosmo_params.dr1(a)) \
-                                                        * jnp.sqrt(3.0) / grho2**1.5 )
-    return jac
+def get_tau(a: float, cosmo_params):
+        return cosmo_params.taumin + romb( lambda loga: jnp.exp(loga)*dtauda_(jnp.exp(loga),cosmo_params), jnp.log(cosmo_params.amin), jnp.log(a))
 
 
 class cosmo:
 
-    def __init__(self, *, Omegam: float, Omegab: float, OmegaL: float, H0: float, Tcmb: float, YHe: float, Neff: float, Nmnu: int = 0, mnu: float = 0.0, rtol: float = 1e-5, atol: float = 1e-5, order: int = 5):
+    def __init__(self, *, Omegam: float, Omegab: float, OmegaL: float, H0: float, Tcmb: float, YHe: float, Neff: float, Nmnu: int = 0, mnu: float = 0.0, rtol: float = 1e-5, atol: float = 1e-7, order: int = 5):
         self.Omegam = Omegam
         self.Omegab = Omegab
         self.OmegaL = OmegaL
@@ -203,7 +239,7 @@ class cosmo:
         self.grhor = 3.3957e-14 * Tcmb**4
         self.adotrad = 2.8948e-7 * Tcmb**2
         self.Omegac = Omegam - Omegab
-        self.Omegak = 1.0 - Omegam - OmegaL
+        self.Omegak = 0.0 #1.0 - Omegam - OmegaL
         # self.OmegaL = 1.0 - Omegam - self.Omegar
 
         # conversion factor for Neutrinos masses (m_nu*c**2/(k_B*T_nu0)
@@ -212,9 +248,9 @@ class cosmo:
         self.amnu = self.mnu * self.mfac
 
         # Compute the scale factor
-        amin = 1e-9
-        amax = 1.1
-        self.a = jnp.geomspace(amin, amax, 1000)
+        self.amin = 1e-9
+        self.amax = 1.01
+        self.a = jnp.geomspace(self.amin, self.amax, 1000)
 
         # Compute the neutrino density and pressure
         self.rhonu = jnp.zeros_like(self.a)
@@ -234,32 +270,8 @@ class cosmo:
         self.ddr1 = lambda a : self.r1.derivative(a,n=2)
         self.dp1 = lambda a : self.p1.derivative(a)
 
-        # Compute cosmic time
-        term = ODETerm(dtauda)
-        if order == 5:
-            solver = Kvaerno5()
-        elif order == 4:
-            solver = Kvaerno4()
-        elif order == 3:
-            solver = Kvaerno3()
-        else:
-            raise NotImplementedError
+        self.taumin = self.amin / self.adotrad
+        self.taumax = self.taumin + romb( lambda loga: jnp.exp(loga)*dtauda_(jnp.exp(loga),self), jnp.log(self.amin), jnp.log(self.amax))
+
+        self.th = pthermo.thermal_history(taumin=self.taumin,taumax=self.taumax,cp=self,N=1000)
         
-        tauini = 0.0
-        saveat = SaveAt(ts=self.a)
-        stepsize_controller = PIDController(rtol=rtol, atol=atol)
-        sol = diffeqsolve(ODETerm(dtauda), solver, t0=amin, t1=amax, dt0=1e-5 * (self.a[1] - self.a[0]), y0=tauini, saveat=saveat,
-                       stepsize_controller=stepsize_controller, args=self)
-        self.tau = sol.ys
-        # sol = solve_ivp(lambda a,tau: dtauda(a,tau,self), \
-        #                 (amin, amax), [tauini], \
-        #                 jac= lambda a,tau: d2tauda2(a,tau,self), \
-        #                 method="BDF", t_eval=self.a)
-        # self.a = np.array(sol["t"])
-        # self.tau = np.array(sol["y"][0])
-
-    def get_tau(self, a: float):
-        return np.interp(a, self.a, self.tau)
-
-    def get_a(self, tau: float):
-        return np.interp(tau, self.tau, self.a)

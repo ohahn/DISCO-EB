@@ -1,7 +1,7 @@
 import numpy as np
 from numba import njit
 
-from pylinger_cosmo import cosmo
+# from pylinger_cosmo import cosmo
 
 
 class thermal_history:
@@ -21,11 +21,11 @@ class thermal_history:
         alpha = alpha0 / np.sqrt(tempb) * phi2 / a**3
         beta = tempb * phi2 * np.exp(beta0 - tion / tempb)
         # ... Peebles' correction factor
-        cpeebles = 1.14 #1.0
+        cpeebles = 1.0
         if tempb >= 200.0:
             cp1 = crec * dec2g * (1.0 - xe) / (a * adot)
             cp2 = crec * tempb * phi2 * np.exp(beta0 - 0.25 * tion / tempb) * (1.0 - xe) / (a * adot)
-            cpeebles = (1.0 + cp1) / (1.0 + cp1 + cp2) *1.14
+            cpeebles = (1.0 + cp1) / (1.0 + cp1 + cp2)
         # ... integrate dxe=bb*(1-xe)-aa*xe*xe by averaging rhs at current tau
         # ... (fraction 1-iswitch) and future tau (fraction iswitch).
         aa = a * dtau * alpha * cpeebles 
@@ -96,6 +96,7 @@ class thermal_history:
 
         cs2 = np.zeros((nthermo))
         ttau = np.zeros((nthermo))
+        aexp = np.zeros((nthermo))
 
         # ... initial codnitions : assume radiation-dominated universe
         tau0 = taumin
@@ -117,9 +118,10 @@ class thermal_history:
         barssc = barssc0 * (1.0 - 0.75 * self.cp.YHe + (1.0 - self.cp.YHe) * xe[0])
         cs2[0] = 4.0 / 3.0 * barssc * tb[0]
         ttau[0] = tau0
+        aexp[0] = a0
 
-        tau_neglect_rad = -1.0
-        a_neglect_rad = 10.0 * (self.cp.grhor + self.cp.grhog) / self.cp.grhom
+        # tau_neglect_rad = -1.0
+        # a_neglect_rad = 10.0 * (self.cp.grhog + self.cp.grhor * (self.cp.Neff+self.cp.Nmnu)) / self.cp.grhom
 
         for i in range(1, nthermo):
             tau = taumin * np.exp(i * dlntau)
@@ -130,18 +132,22 @@ class thermal_history:
             # integrate Friedmann equation using inverse trapezoidal rule.
             a = a0 + adot0 * dtau
 
+            rhonu = np.interp(a, self.cp.a, self.cp.rhonu)
             grho = (
-                self.cp.grhom * self.cp.Omegam / a
-                + (self.cp.grhor + self.cp.grhog) / a**2
-                + self.cp.grhom * self.cp.OmegaL * a**2
+                self.cp.grhom * self.cp.Omegam * a
+                + (self.cp.grhog + self.cp.grhor * (self.cp.Neff + self.cp.Nmnu * rhonu))
+                + self.cp.grhom * self.cp.OmegaL * a**4
+                + self.cp.grhom * self.cp.Omegak * a**2
             )
-            adot = np.sqrt(grho / 3.0) * a
+            adot = np.sqrt(grho / 3.0) 
 
             a = a0 + 2 * dtau / (1.0 / adot0 + 1.0 / adot)
 
+            aexp[i] = a
+
             # ... check if radiation can be neglected
-            if (tau_neglect_rad < 0.0) and (a > a_neglect_rad):
-                tau_neglect_rad = tau
+            # if (tau_neglect_rad < 0.0) and (a > a_neglect_rad):
+            #     tau_neglect_rad = tau
 
             # ... baryon temperature evolution: adiabatic except for Thomson cooling
             # ... use quadratic solution.
@@ -181,7 +187,7 @@ class thermal_history:
             tau0 = tau
             adot0 = adot
 
-        return ttau, tb, cs2, xe, xHII, xHeII, xHeIII
+        return ttau, aexp, tb, cs2, xe, xHII, xHeII, xHeIII
 
     def evaluate_at_tau(self, tau):
         tempb = np.interp(tau, self.tau, self.tb)
@@ -190,7 +196,7 @@ class thermal_history:
 
         return tempb, cs2, xe
 
-    def __init__(self, *, taumin: float, taumax: float, cp: cosmo, N: int):
+    def __init__(self, *, taumin: float, taumax: float, cp, N: int):
         self.cp = cp
 
-        self.tau, self.tb, self.cs2, self.xe, self.xHII, self.xHeII, self.xHeIII = self.compute(taumin, taumax, N)
+        self.tau, self.aexp, self.tb, self.cs2, self.xe, self.xHII, self.xHeII, self.xHeIII = self.compute(taumin, taumax, N)

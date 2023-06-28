@@ -2,7 +2,7 @@ import numpy as np
 
 import jax.numpy as jnp
 
-from pylinger_cosmo import cosmo, nu_perturb_jax, nu_perturb_numpy
+from pylinger_cosmo import cosmo, nu_perturb_jax, nu_perturb_numpy, get_tau
 from pylinger_thermo import thermal_history
 
 from scipy.integrate import solve_ivp
@@ -245,7 +245,7 @@ def model_synchronous(tau, yin, params) -> np.ndarray:
         dlfdlq = -q / (1.0 + np.exp(-q))  # derivative of the Fermi-Dirac distribution
 
         f[:, params.iq0 : params.iq1] = (
-            -params.ak[:, None] * v[None, :] * y[:, params.iq0 : params.iq1] + hdot[:, None] * dlfdlq / 6.0
+            -params.ak[:, None] * v[None, :] * y[:, params.iq1 : params.iq2] + hdot[:, None] * dlfdlq / 6.0
         )
         f[:, params.iq1 : params.iq2] = (
             params.ak[:, None]
@@ -384,14 +384,16 @@ def adiabatic_ics(tau: float, params) -> np.ndarray:
 
 
 class pt_synchronous:
-    def __init__(self, *, cp: cosmo, th: thermal_history):
+    def __init__(self, *, cp: cosmo):
         self.cp = cp
-        self.th = th
+        self.th = cp.th
 
     def compute(
         self, *, kmodes: np.ndarray, aexp_out: np.ndarray, rtol: float = 1e-3, atol: float = 1e-4
     ) -> tuple[np.ndarray, np.ndarray]:
-        tau_out = self.cp.get_tau(aexp_out)
+        tau_out = np.zeros_like(aexp_out)
+        for i in range(len(aexp_out)):
+            tau_out[i] = get_tau(aexp_out[i], self.cp)
         tau_start = np.minimum(1e-3 / np.max(kmodes), 0.1)
         tau_max = np.max(tau_out)
 
@@ -402,7 +404,7 @@ class pt_synchronous:
 
         # number of multipoles for photon and neutrino perturbations
         self.lmax = np.minimum(10, int(1.5 * self.akmax * tau_max + 10.0))  # check in CLASS!
-        self.lmaxnu = 64  # 50 in linger_syn, check in CLASS!
+        self.lmaxnu = 32  # 50 in linger_syn, check in CLASS!
         self.nqmax = 15
         self.iq0 = 11 + 3 * self.lmax
         self.iq1 = self.iq0 + self.nqmax
