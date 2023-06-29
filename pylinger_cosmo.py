@@ -1,4 +1,4 @@
-import pylinger_thermo as pthermo
+import pylinger_thermo_jax as pthermo
 
 import numpy as np
 from scipy.integrate import solve_ivp
@@ -10,7 +10,6 @@ import jax.numpy as jnp
 import jax_cosmo.scipy.interpolate as jaxinterp
 import scipy.interpolate as scipyinterp
 from jax_cosmo.scipy.integrate import romb
-# from diffrax import diffeqsolve, Dopri5, Kvaerno3, Kvaerno4, Kvaerno5, ODETerm, SaveAt, PIDController
 from functools import partial
 
 @jax.jit
@@ -118,29 +117,30 @@ def nu_perturb_jax( a : float, amnu: float, psi0, psi1, psi2, nq : int = 1000, q
     # const = 7 * np.pi**4 / 120
     const = 5.682196976983475
 
-    g1 = jnp.zeros((nqmax0))
-    g2 = jnp.zeros((nqmax0))
-    g3 = jnp.zeros((nqmax0))
-    g4 = jnp.zeros((nqmax0))
+    g1 = jnp.zeros((nqmax0+1))
+    g2 = jnp.zeros((nqmax0+1))
+    g3 = jnp.zeros((nqmax0+1))
+    g4 = jnp.zeros((nqmax0+1))
     q  = (jnp.arange(1,nqmax0+1) - 0.5)  # so dq == 1
+    qq = jnp.arange(0,nqmax0+1)  # so dq == 1
     # q.at[0].set(0.0)
 
     aq = a * amnu / q
     v = 1 / jnp.sqrt(1 + aq**2)
     qdn = q**3 / (jnp.exp(q) + 1)
-    g1 = qdn * psi0 / v
-    g2 = qdn * psi0 * v
-    g3 = qdn * psi1 
-    g4 = qdn * psi2 * v
+    g1 = g1.at[1:].set( qdn * psi0 / v )
+    g2 = g2.at[1:].set( qdn * psi0 * v )
+    g3 = g3.at[1:].set( qdn * psi1 )
+    g4 = g4.at[1:].set( qdn * psi2 * v )
 
-    g1_sp = jaxinterp.InterpolatedUnivariateSpline(q, g1)
-    g01 = g1_sp.integral(0, qmax0)
-    g2_sp = jaxinterp.InterpolatedUnivariateSpline(q, g2)
-    g02 = g2_sp.integral(0, qmax0)
-    g3_sp = jaxinterp.InterpolatedUnivariateSpline(q, g3)
-    g03 = g3_sp.integral(0, qmax0)
-    g4_sp = jaxinterp.InterpolatedUnivariateSpline(q, g4)
-    g04 = g4_sp.integral(0, qmax0)
+    g1_sp = jaxinterp.InterpolatedUnivariateSpline(qq, g1)
+    g01 = g1_sp.integral(0, qmax0)[0]
+    g2_sp = jaxinterp.InterpolatedUnivariateSpline(qq, g2)
+    g02 = g2_sp.integral(0, qmax0)[0]
+    g3_sp = jaxinterp.InterpolatedUnivariateSpline(qq, g3)
+    g03 = g3_sp.integral(0, qmax0)[0]
+    g4_sp = jaxinterp.InterpolatedUnivariateSpline(qq, g4)
+    g04 = g4_sp.integral(0, qmax0)[0]
 
     # Apply asymptotic corrrection for q>qmax0
     drhonu = (g01 + g1[-1] * 2 / qmax) / const
@@ -207,71 +207,89 @@ def nu_perturb_numpy( a : float, amnu: float, psi0, psi1, psi2, nq : int = 1000,
 
     return drhonu, dpnu, fnu, shearnu
 
-@partial(jax.jit, static_argnames=("cosmo_params",))
-def dtauda_(a, cosmo_params):
-    rhonu = cosmo_params.rhonu_sp(a)
+# @partial(jax.jit, static_argnames=("params",))
+@jax.jit
+def dtauda_(a, grhom, grhog, grhor, Omegam, OmegaL, Omegak, Neff, Nmnu, rhonu_spline):
     """Derivative of conformal time with respect to scale factor"""
-    grho2 = cosmo_params.grhom * cosmo_params.Omegam * a 
-    + (cosmo_params.grhog + cosmo_params.grhor*(cosmo_params.Neff+cosmo_params.Nmnu*rhonu)) 
-    + cosmo_params.grhom * cosmo_params.OmegaL * a**4 
-    + cosmo_params.grhom * cosmo_params.Omegak * a**2
+    grho2 = grhom * Omegam * a 
+    + (grhog + grhor*(Neff+Nmnu*rhonu_spline(a))) 
+    + grhom * OmegaL * a**4 
+    + grhom * Omegak * a**2
     return jnp.sqrt(3.0 / grho2)
-
-@partial(jax.jit, static_argnames=("cosmo_params",))
-def get_tau(a: float, cosmo_params):
-        return cosmo_params.taumin + romb( lambda loga: jnp.exp(loga)*dtauda_(jnp.exp(loga),cosmo_params), jnp.log(cosmo_params.amin), jnp.log(a))
-
 
 class cosmo:
 
     def __init__(self, *, Omegam: float, Omegab: float, OmegaL: float, H0: float, Tcmb: float, YHe: float, Neff: float, Nmnu: int = 0, mnu: float = 0.0, rtol: float = 1e-5, atol: float = 1e-7, order: int = 5):
-        self.Omegam = Omegam
-        self.Omegab = Omegab
-        self.OmegaL = OmegaL
-        self.Nmnu = Nmnu
-        self.mnu = mnu
-        self.H0 = H0
-        self.Tcmb = Tcmb
-        self.YHe = YHe
-        self.Neff = Neff
-        self.grhom = 3.3379e-11 * H0**2
-        self.grhog = 1.4952e-13 * Tcmb**4
-        self.grhor = 3.3957e-14 * Tcmb**4
-        self.adotrad = 2.8948e-7 * Tcmb**2
-        self.Omegac = Omegam - Omegab
-        self.Omegak = 0.0 #1.0 - Omegam - OmegaL
-        # self.OmegaL = 1.0 - Omegam - self.Omegar
-
-        # conversion factor for Neutrinos masses (m_nu*c**2/(k_B*T_nu0)
         c2ok = 1.62581581e4 # K / eV
-        self.mfac = c2ok / Tcmb
-        self.amnu = self.mnu * self.mfac
+        amin = 1e-9
+        amax = 1.01
+        num_thermo = 1000 # length of thermal history arrays
 
-        # Compute the scale factor
-        self.amin = 1e-9
-        self.amax = 1.01
-        self.a = jnp.geomspace(self.amin, self.amax, 1000)
+        # mean densities
+        Omegak = 0.0 #1.0 - Omegam - OmegaL
+
+        grhom = 3.3379e-11 * H0**2 # critical density at z=0 in h^2/Mpc^3
+        grhog = 1.4952e-13 * Tcmb**4 # photon density in h^2/Mpc^3
+        grhor = 3.3957e-14 * Tcmb**4 # neutrino density per flavour in h^2/Mpc^3
+        adotrad = 2.8948e-7 * Tcmb**2 # Hubble during radiation domination
+
+        self.param = {
+            'Omegam': Omegam,
+            'Omegab': Omegab,
+            'OmegaL': OmegaL,
+            'Omegac': Omegam - Omegab,
+            'Omegak': Omegak,
+            'H0': H0,
+            'Tcmb': Tcmb,
+            'YHe': YHe,
+            'Neff': Neff,
+            'Nmnu': Nmnu,
+            'mnu': mnu,
+            'grhom': grhom,
+            'grhog': grhog,
+            'grhor': grhor,
+            'adotrad': adotrad,
+            'amnu': mnu * c2ok / Tcmb, # conversion factor for Neutrinos masses (m_nu*c**2/(k_B*T_nu0)
+            'amin' : amin,
+            'amax' : amax,
+        }
+        # Compute the scale factor linearly spaced in log(a)
+        a = jnp.geomspace(amin, amax, num_thermo)
 
         # Compute the neutrino density and pressure
-        self.rhonu = jnp.zeros_like(self.a)
-        self.pnu = jnp.zeros_like(self.a)
-        for i in range(len(self.a)):
-            rhonu, pnu = ninu1(self.a[i], self.amnu )
-            self.rhonu = self.rhonu.at[i].set(rhonu)
-            self.pnu = self.pnu.at[i].set(pnu)
+        rhonu = jnp.zeros_like(a)
+        pnu = jnp.zeros_like(a)
+        for i in range(num_thermo):
+            rhonu_, pnu_ = ninu1(a[i], self.param['amnu'] )
+            rhonu = rhonu.at[i].set(rhonu_)
+            pnu = pnu.at[i].set(pnu_)
 
-        self.rhonu_sp = jaxinterp.InterpolatedUnivariateSpline(self.a, self.rhonu)
-        self.pnu_sp = jaxinterp.InterpolatedUnivariateSpline(self.a, self.pnu)
+        rhonu_spline =  jaxinterp.InterpolatedUnivariateSpline(a, rhonu)
+        self.param['rhonu_of_a_spline'] = rhonu_spline
+        self.param['pnu_of_a_spline']   = jaxinterp.InterpolatedUnivariateSpline(a, pnu)
         
-        self.r1 = jaxinterp.InterpolatedUnivariateSpline(self.a, jnp.log(self.rhonu))
-        self.p1 = jaxinterp.InterpolatedUnivariateSpline(self.a, jnp.log(self.pnu))
+        # self.r1 = jaxinterp.InterpolatedUnivariateSpline(self.a, jnp.log(self.rhonu))
+        # self.p1 = jaxinterp.InterpolatedUnivariateSpline(self.a, jnp.log(self.pnu))
         
-        self.dr1 = lambda a : self.r1.derivative(a)
-        self.ddr1 = lambda a : self.r1.derivative(a,n=2)
-        self.dp1 = lambda a : self.p1.derivative(a)
+        # self.dr1 = lambda a : self.r1.derivative(a)
+        # self.ddr1 = lambda a : self.r1.derivative(a,n=2)
+        # self.dp1 = lambda a : self.p1.derivative(a)
 
-        self.taumin = self.amin / self.adotrad
-        self.taumax = self.taumin + romb( lambda loga: jnp.exp(loga)*dtauda_(jnp.exp(loga),self), jnp.log(self.amin), jnp.log(self.amax))
+        taumin = amin / adotrad
+        taumax = taumin + romb( lambda loga: jnp.exp(loga) * dtauda_(jnp.exp(loga),grhom, grhog, grhor, Omegam, OmegaL, Omegak, Neff, Nmnu, rhonu_spline), jnp.log(amin), jnp.log(amax) )
+        self.param['taumin'] = taumin
+        self.param['taumax'] = taumax
 
-        self.th = pthermo.thermal_history(taumin=self.taumin,taumax=self.taumax,cp=self,N=1000)
+        # self.th = pthermo.thermal_history(taumin=self.taumin,taumax=self.taumax,cp=self,N=1000)
+        th = pthermo.compute( taumin=taumin, taumax=taumax, nthermo=num_thermo, Tcmb=Tcmb,
+                             YHe=YHe, H0=H0, Omegab=Omegab, Omegam=Omegam, OmegaL=OmegaL,
+                             Neff=Neff, Nmnu=Nmnu, rhonu_sp=rhonu_spline )
+        
+        self.param['cs2_of_tau_spline']   = jaxinterp.InterpolatedUnivariateSpline(th['tau'], th['cs2'])
+        self.param['tempb_of_tau_spline'] = jaxinterp.InterpolatedUnivariateSpline(th['tau'], th['tb'])
+        self.param['xe_of_tau_spline']    = jaxinterp.InterpolatedUnivariateSpline(th['tau'], th['xe'])
+        self.param['a_of_tau_spline']     = jaxinterp.InterpolatedUnivariateSpline(th['tau'], th['a'])
+        self.param['tau_of_a_spline']     = jaxinterp.InterpolatedUnivariateSpline(th['a'], th['tau'])
+        
+        
         
