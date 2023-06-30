@@ -125,7 +125,7 @@ def compute(*, taumin: float, taumax: float, nthermo: int, Tcmb: float, YHe: flo
         # integrate Friedmann equation using inverse trapezoidal rule.
         new_a = a + adot * dtau
 
-        rhonu = rhonu_sp( new_a)
+        rhonu = rhonu_sp( new_a )
         grho = (
             grhom * Omegam / new_a
             + (grhog + grhor * (Neff + Nmnu * rhonu)) / new_a**2

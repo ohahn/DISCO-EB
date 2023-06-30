@@ -419,9 +419,7 @@ def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k 
     nvar   = 7 + 3 * (lmax + 1) + nqmax * (lmaxnu + 1)
 
     # determine output times from aexp_out
-    tau_out = jnp.zeros_like(aexp_out)
-    for i in range(len(aexp_out)):
-        tau_out = tau_out.at[i].set( param['tau_of_a_spline'](aexp_out[i]) )
+    tau_out = jax.vmap( lambda a: param['tau_of_a_spline'](a) )(aexp_out)
     tau_start = jnp.minimum(1e-3 / jnp.max(kmodes), 0.1)
     tau_max = jnp.max(tau_out)
     nout = aexp_out.shape[0]
@@ -437,16 +435,17 @@ def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k 
         lambda tau, y , params : 
             model_synchronous( tau=tau, yin=y, param=param, kmodes=kmodes, num_k=num_k, nvar=nvar, lmax=lmax, lmaxnu=lmaxnu, nqmax=nqmax ) 
     )
-    
-    # nsteps = 100
-    # dtau = (tau_max - tau_start) / nsteps
-    # tau  = tau_start
-    # ys = jnp.copy(y0)
-    # for n in range(nsteps):
-    #     dy0 = model_synchronous( tau=tau, yin=ys, param=param, kmodes=kmodes, num_k=num_k, nvar=nvar, lmax=lmax, lmaxnu=lmaxnu, nqmax=nqmax ) 
-    #     ys += dy0 * dtau
-    #     tau += dtau
-    # return ys.reshape( (num_k, nvar) ), kmodes, tau
+
+    # return y0.reshape( (num_k, nvar) ), model_synchronous( tau=tau_start, yin=y0, param=param, kmodes=kmodes, num_k=num_k, nvar=nvar, lmax=lmax, lmaxnu=lmaxnu, nqmax=nqmax ).reshape((num_k, nvar)), kmodes
+    # # nsteps = 100
+    # # dtau = (tau_max - tau_start) / nsteps
+    # # tau  = tau_start
+    # # ys = jnp.copy(y0)
+    # # for n in range(nsteps):
+    # #     dy0 = model_synchronous( tau=tau, yin=ys, param=param, kmodes=kmodes, num_k=num_k, nvar=nvar, lmax=lmax, lmaxnu=lmaxnu, nqmax=nqmax ) 
+    # #     ys += dy0 * dtau
+    # #     tau += dtau
+    # # return ys.reshape( (num_k, nvar) ), kmodes, tau
 
     solver = diffrax.ImplicitEuler( nonlinear_solver=diffrax.NewtonNonlinearSolver(rtol=rtol,atol=atol) )
     saveat = diffrax.SaveAt(ts=tau_out)
