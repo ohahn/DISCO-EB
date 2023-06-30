@@ -4,8 +4,9 @@ import jax_cosmo.scipy.interpolate as jaxinterp
 from pylinger_cosmo import cosmo, nu_perturb_jax
 from functools import partial
 import diffrax
+# import equinox as eqx  # https://github.com/patrick-kidger/equinox
 
-@partial(jax.jit, static_argnames=('kmodes', 'num_k', 'nvar', 'lmax', 'lmaxnu', 'nqmax'))
+# @partial(jax.jit, static_argnames=('kmodes', 'num_k', 'nvar', 'lmax', 'lmaxnu', 'nqmax'))
 def model_synchronous(*, tau, yin, param, kmodes, num_k, nvar, lmax, lmaxnu, nqmax, ):
     iq0 = 11 + 3 * lmax
     iq1 = iq0 + nqmax
@@ -191,6 +192,19 @@ def model_synchronous(*, tau, yin, param, kmodes, num_k, nvar, lmax, lmaxnu, nqm
             - opac * y[:, 10 + lmax]
             + 0.1 * opac * polter
         )
+        # i = jnp.arange( 2, lmax - 1 )
+        # ni = len(i)
+        # f = f.at[:, 10:10+ni].set(
+        #         kmodes[:,None] * (1 / (2 * i[None,:] + 2)) * ((i[None,:] + 1) * y[:, 9:9+ni] - (i[None,:] + 2) * y[:, 11:11+ni]) - opac * y[:, 10:10+ni]
+        #     )
+        # f = f.at[:, 11+lmax:11+lmax+ni].set(
+        #         kmodes[:,None]
+        #         * (1 / (2 * i[None,:] + 2))
+        #         * ((i[None,:] + 1) * y[:, 10 + lmax:10 + lmax + ni] - (i[None,:] + 2) * y[:, 12 + lmax: 12 + lmax + ni])
+        #         - opac * y[:, 11 + lmax : 11 + lmax + ni]
+        #     )
+
+
         for i in range(2, lmax - 1):
             f = f.at[:, 8 + i].set(
                 kmodes * (1 / (2 * i + 2)) * ((i + 1) * y[:, 7 + i] - (i + 2) * y[:, 9 + i]) - opac * y[:, 8 + i]
@@ -217,9 +231,7 @@ def model_synchronous(*, tau, yin, param, kmodes, num_k, nvar, lmax, lmaxnu, nqm
 
     # ... truncate moment expansion
     f = f.at[:, 7 + lmax].set(
-        kmodes * y[:, 6 + lmax]
-        - (lmax + 1) / tau * y[:, 7 + lmax]
-        - opac * y[:, 7 + lmax]
+        kmodes * y[:, 6 + lmax] - (lmax + 1) / tau * y[:, 7 + lmax] - opac * y[:, 7 + lmax]
     )
     f = f.at[:, 8 + 2 * lmax].set(
         kmodes * y[:, 7 + 2 * lmax] - (lmax + 1) / tau * y[:, 8 + 2 * lmax] - opac * y[:, 8 + 2 * lmax]
@@ -233,6 +245,11 @@ def model_synchronous(*, tau, yin, param, kmodes, num_k, nvar, lmax, lmaxnu, nqm
     f = f.at[:, 11 + 2 * lmax].set(
         8.0 / 15.0 * thetar - 0.6 * kmodes * y[:, 12 + 2 * lmax] + 4.0 / 15.0 * hdot + 8.0 / 5.0 * etadot
     )
+    # l = jnp.arange(2, lmax - 1)
+    # nl = len(l)
+    # f = f.at[:, 12 + 2 * lmax : 12 + 2 * lmax + nl].set(
+    #     kmodes / (2 * l + 2) * ((l + 1) * y[:, 11 + 2 * lmax: 11+2*lmax+nl] - (l + 2) * y[:, 13 + 2 * lmax:13+2*lmax + nl])
+    # )
     for l in range(2, lmax - 1):
         f = f.at[:, 10 + 2 * lmax + l].set(
             kmodes / (2 * l + 2) * ((l + 1) * y[:, 9 + 2 * lmax + l] - (l + 2) * y[:, 11 + 2 * lmax + l])
@@ -274,8 +291,7 @@ def model_synchronous(*, tau, yin, param, kmodes, num_k, nvar, lmax, lmaxnu, nqm
 
     return f.flatten()
 
-
-@partial(jax.jit, static_argnames=('num_k', 'nvar', 'lmax', 'nqmax'))
+# @partial(jax.jit, static_argnames=('num_k', 'nvar', 'lmax', 'nqmax'))
 def adiabatic_ics( *, tau: float, param, kmodes, num_k, nvar, lmax, nqmax):
     """Initial conditions for adiabatic perturbations"""
     iq0 = 11 + 3 * lmax
@@ -379,8 +395,9 @@ def adiabatic_ics( *, tau: float, param, kmodes, num_k, nvar, lmax, nqmax):
     
     return y.flatten()
 
+
 @partial(jax.jit, static_argnames=("kmin","kmax","num_k","lmax","lmaxnu","nqmax","rtol","atol"))
-def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k : int, lmax : int = 32, lmaxnu : int = 32, nqmax : int = 15, rtol: float = 1e-3, atol: float = 1e-4 ):
+def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k : int, lmax : int = 10, lmaxnu : int = 10, nqmax : int = 15, rtol: float = 1e-3, atol: float = 1e-3 ):
     """evolve cosmological perturbations in the synchronous gauge
 
     Args:
@@ -412,24 +429,39 @@ def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k 
     
     # set initial conditions
     y0 = adiabatic_ics( tau=tau_start, param=param, kmodes=kmodes, num_k=num_k, nvar=nvar, lmax=lmax, nqmax=nqmax )
+    # dy0 = model_synchronous( tau=tau_start, yin=y0, param=param, kmodes=kmodes, num_k=num_k, nvar=nvar, lmax=lmax, lmaxnu=lmaxnu, nqmax=nqmax ) 
+    # return y0.reshape( (num_k, nvar) ), dy0.reshape((num_k, nvar)), kmodes
 
     # solve ODEs 
     model = diffrax.ODETerm( 
         lambda tau, y , params : 
-            model_synchronous( tau=tau, yin=y, param=param, kmodes=kmodes, num_k=num_k, nvar=nvar, lmax=lmax, lmaxnu=lmaxnu, nqmax=nqmax) 
+            model_synchronous( tau=tau, yin=y, param=param, kmodes=kmodes, num_k=num_k, nvar=nvar, lmax=lmax, lmaxnu=lmaxnu, nqmax=nqmax ) 
     )
+    
+    # nsteps = 100
+    # dtau = (tau_max - tau_start) / nsteps
+    # tau  = tau_start
+    # ys = jnp.copy(y0)
+    # for n in range(nsteps):
+    #     dy0 = model_synchronous( tau=tau, yin=ys, param=param, kmodes=kmodes, num_k=num_k, nvar=nvar, lmax=lmax, lmaxnu=lmaxnu, nqmax=nqmax ) 
+    #     ys += dy0 * dtau
+    #     tau += dtau
+    # return ys.reshape( (num_k, nvar) ), kmodes, tau
 
-    solver = diffrax.Dopri5()
+    solver = diffrax.ImplicitEuler( nonlinear_solver=diffrax.NewtonNonlinearSolver(rtol=rtol,atol=atol) )
     saveat = diffrax.SaveAt(ts=tau_out)
-    stepsize_controller = diffrax.PIDController(rtol=rtol, atol=atol)
+    # stepsize_controller = diffrax.PIDController(rtol=rtol, atol=atol, force_dtmin = 1e-2*(tau_max-tau_start))#, pcoeff=0.4, icoeff=0.3, dcoeff=0)
+    stepsize_controller = diffrax.ConstantStepSize()
     sol = diffrax.diffeqsolve(
-        model,
-        solver,
-        tau_start,
-        tau_max,
-        1e-5*(tau_max-tau_start),
-        y0,
+        terms=model,
+        solver=solver,
+        t0=tau_start,
+        t1=tau_max,
+        dt0=1e-3*(tau_max-tau_start),
+        y0=y0,
         saveat=saveat,
         stepsize_controller=stepsize_controller,
+        max_steps=1010,
     )
     return sol.ys.reshape((num_k, nvar, nout)), kmodes, sol.ts
+
