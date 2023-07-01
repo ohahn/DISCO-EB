@@ -219,11 +219,11 @@ def dtauda_(a, grhom, grhog, grhor, Omegam, OmegaL, Omegak, Neff, Nmnu, rhonu_sp
 
 class cosmo:
 
-    def __init__(self, *, Omegam: float, Omegab: float, OmegaL: float, H0: float, Tcmb: float, YHe: float, Neff: float, Nmnu: int = 0, mnu: float = 0.0, rtol: float = 1e-5, atol: float = 1e-7, order: int = 5):
+    def __init__(self, *, Omegam: float, Omegab: float, OmegaL: float, H0: float, Tcmb: float = 2.7255, YHe: float = 0.24, Neff: float = 2.046, Nmnu: int = 1, mnu: float = 0.06, rtol: float = 1e-5, atol: float = 1e-7, order: int = 5):
         c2ok = 1.62581581e4 # K / eV
         amin = 1e-9
         amax = 1.01
-        num_thermo = 1000 # length of thermal history arrays
+        num_thermo = 2048 # length of thermal history arrays
 
         # mean densities
         Omegak = 0.0 #1.0 - Omegam - OmegaL
@@ -263,16 +263,9 @@ class cosmo:
         rhonu_spline =  jaxinterp.InterpolatedUnivariateSpline(a, rhonu_)
         self.param['rhonu_of_a_spline'] = rhonu_spline
         self.param['pnu_of_a_spline']   = jaxinterp.InterpolatedUnivariateSpline(a, pnu_)
-        
-        # self.r1 = jaxinterp.InterpolatedUnivariateSpline(self.a, jnp.log(self.rhonu))
-        # self.p1 = jaxinterp.InterpolatedUnivariateSpline(self.a, jnp.log(self.pnu))
-        
-        # self.dr1 = lambda a : self.r1.derivative(a)
-        # self.ddr1 = lambda a : self.r1.derivative(a,n=2)
-        # self.dp1 = lambda a : self.p1.derivative(a)
 
         taumin = amin / adotrad
-        taumax = taumin + romb( lambda loga: jnp.exp(loga) * dtauda_(jnp.exp(loga),grhom, grhog, grhor, Omegam, OmegaL, Omegak, Neff, Nmnu, rhonu_spline), jnp.log(amin), jnp.log(amax) )
+        taumax = taumin + romb( lambda a: dtauda_(a,grhom, grhog, grhor, Omegam, OmegaL, Omegak, Neff, Nmnu, rhonu_spline), amin, amax )
         self.param['taumin'] = taumin
         self.param['taumax'] = taumax
 
@@ -281,7 +274,7 @@ class cosmo:
                              YHe=YHe, H0=H0, Omegab=Omegab, Omegam=Omegam, OmegaL=OmegaL,
                              Neff=Neff, Nmnu=Nmnu, rhonu_sp=rhonu_spline )
         
-        self.param['th'] = th
+        self.param['th'] = th # for debugging, otherwise no need to store
         
         self.param['cs2_of_tau_spline']   = jaxinterp.InterpolatedUnivariateSpline(th['tau'], th['cs2'])
         self.param['tempb_of_tau_spline'] = jaxinterp.InterpolatedUnivariateSpline(th['tau'], th['tb'])

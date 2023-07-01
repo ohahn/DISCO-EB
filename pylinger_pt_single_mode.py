@@ -6,44 +6,44 @@ from functools import partial
 import diffrax
 # import equinox as eqx  # https://github.com/patrick-kidger/equinox
 
-# @partial(jax.jit, static_argnames=('kmodes', 'num_k', 'nvar', 'lmax', 'lmaxnu', 'nqmax'))
-def model_synchronous(*, tau, yin, param, kmodes, num_k, nvar, lmax, lmaxnu, nqmax, ):
+# @partial(jax.jit, static_argnames=('kmodes', 'lmax', 'lmaxnu', 'nqmax'))
+def model_synchronous(*, tau, yin, param, kmode, lmax, lmaxnu, nqmax, ):
     iq0 = 11 + 3 * lmax
     iq1 = iq0 + nqmax
     iq2 = iq1 + nqmax
     iq3 = iq2 + nqmax
     iq4 = iq3 + nqmax
 
-    y = jnp.copy(yin).reshape((num_k, nvar))
+    y = jnp.copy(yin)
     f = jnp.zeros_like(y)
 
     # print(y[0,0])
 
     # ... metric
-    a = y[:, 0]
-    ahdot = y[:, 1]
-    eta = y[:, 2]
+    a = y[0]
+    ahdot = y[1]
+    eta = y[2]
 
     # ... cdm
-    deltac = y[:, 3]
-    thetac = y[:, 4]
+    deltac = y[3]
+    thetac = y[4]
 
     # ... baryons
-    deltab = y[:, 5]
-    thetab = y[:, 6]
+    deltab = y[5]
+    thetab = y[6]
 
     # ... photons
-    deltag = y[:, 7]
-    thetag = y[:, 8]
-    shearg = y[:, 9] / 2.0
+    deltag = y[7]
+    thetag = y[8]
+    shearg = y[9] / 2.0
 
     # ... polarization term
-    polter = y[:, 9] + y[:, 8 + lmax] + y[:, 10 + lmax]
+    polter = y[9] + y[8 + lmax] + y[10 + lmax]
 
     # ... massless neutrinos
-    deltar = y[:, 9 + 2 * lmax]
-    thetar = y[:, 10 + 2 * lmax]
-    shearr = y[:, 11 + 2 * lmax] / 2.0
+    deltar = y[9 + 2 * lmax]
+    thetar = y[10 + 2 * lmax]
+    shearr = y[11 + 2 * lmax] / 2.0
 
     # tempb, cs2, xe = params.th.evaluate_at_tau(tau)
     tempb = param['tempb_of_tau_spline']( tau )
@@ -75,29 +75,11 @@ def model_synchronous(*, tau, yin, param, kmodes, num_k, nvar, lmax, lmaxnu, nqm
         (param['grhog'] + param['grhor'] * param['Neff']) / 3.0 + param['grhor'] * param['Nmnu'] * pnu
     ) / a**2 - param['grhom'] * param['OmegaL'] * a**2
 
-    f = f.at[..., 0].set( adotoa * a )
+    f = f.at[0].set( adotoa * a )
 
     
     # ... evaluate metric perturbations
-    drhonu, dpnu, fnu, shearnu = jax.vmap( 
-        lambda i: nu_perturb_jax( a[0], param['amnu'], y[i, iq0:iq1], y[i, iq1:iq2], y[i, iq2:iq3] ) )( jnp.arange(num_k) )
-
-    # drhonu  = jnp.zeros((num_k))
-    # dpnu    = jnp.zeros((num_k))
-    # fnu     = jnp.zeros((num_k))
-    # shearnu = jnp.zeros((num_k))
-    # for i in range(num_k):
-    #     nur, nup, nuf, nus = nu_perturb_jax(
-    #         a[0],
-    #         param['amnu'],
-    #         y[i, iq0:iq1],
-    #         y[i, iq1:iq2],
-    #         y[i, iq2:iq3],
-    #     )
-    #     drhonu = drhonu.at[i].set(nur)
-    #     dpnu = dpnu.at[i].set(nup)
-    #     fnu = fnu.at[i].set(nuf)
-    #     shearnu = shearnu.at[i].set(nus)
+    drhonu, dpnu, fnu, shearnu = nu_perturb_jax( a, param['amnu'], y[iq0:iq1], y[iq1:iq2], y[iq2:iq3] )
 
     dgrho = (
         param['grhom'] * (param['Omegac'] * deltac + param['Omegab'] * deltab) / a
@@ -109,18 +91,18 @@ def model_synchronous(*, tau, yin, param, kmodes, num_k, nvar, lmax, lmaxnu, nqm
 
     dahdotdtau = -(dgrho + 3.0 * dgpres) * a
     
-    f = f.at[..., 1].set( dahdotdtau )
+    f = f.at[1].set( dahdotdtau )
 
     # ... force energy conservation
-    hdot = (2.0 * kmodes**2 * eta + dgrho) / adotoa
+    hdot = (2.0 * kmode**2 * eta + dgrho) / adotoa
 
     dgtheta = (
         param['grhom'] * (param['Omegac'] * thetac + param['Omegab'] * thetab) / a
         + 4.0 / 3.0 * (param['grhog'] * thetag + param['Neff'] * param['grhor'] * thetar) / a**2
-        + param['Nmnu'] * param['grhor'] * kmodes * fnu / a**2
+        + param['Nmnu'] * param['grhor'] * kmode * fnu / a**2
     )
-    etadot = 0.5 * dgtheta / kmodes**2
-    f = f.at[:, 2].set( etadot )
+    etadot = 0.5 * dgtheta / kmode**2
+    f = f.at[2].set( etadot )
 
     dgshear = (
         4.0 / 3.0 * (param['grhog'] * shearg + param['Neff'] * param['grhor'] * shearr) / a**2
@@ -129,34 +111,34 @@ def model_synchronous(*, tau, yin, param, kmodes, num_k, nvar, lmax, lmaxnu, nqm
 
     # ... cdm equations of motion
     deltacdot = -thetac - 0.5 * hdot
-    f = f.at[:, 3].set( deltacdot )
+    f = f.at[3].set( deltacdot )
     thetacdot = -adotoa * thetac
-    f = f.at[:, 4].set( thetacdot )
+    f = f.at[4].set( thetacdot )
 
     # ... baryon equations of motion
     deltabdot = -thetab - 0.5 * hdot
-    f = f.at[:, 5].set( deltabdot )
+    f = f.at[5].set( deltabdot )
     # ... need photon perturbation for first-order correction to tightly-coupled baryon-photon approx.
     deltagdot = 4.0 / 3.0 * (-thetag - 0.5 * hdot)
     drag = opac * (thetag - thetab)
 
     def calc_thetabdot_lowt():
         # ... treat baryons and photons as uncoupled
-        return -adotoa * thetab + kmodes**2 * cs2 * deltab + pb43 * drag
+        return -adotoa * thetab + kmode**2 * cs2 * deltab + pb43 * drag
     
     def calc_thetabdot_hight():
         # ... treat baryons and photons as tighly coupled.
         # ... zeroth order approx to baryon velocity
         thetabdot_hight = (
-            -adotoa * thetab + kmodes**2 * cs2 * deltab + kmodes**2 * pb43 * (0.25 * deltag - shearg)
+            -adotoa * thetab + kmode**2 * cs2 * deltab + kmode**2 * pb43 * (0.25 * deltag - shearg)
         ) / (1.0 + pb43)
         adotdota = 0.5 * (adotoa * adotoa - gpres)
 
         # ... first-order approximation to baryon-photon slip, thetabdot-thetagdot.
         slip = 2.0 * pb43 / (1.0 + pb43) * adotoa * (thetab - thetag) + 1.0 / opac * (
             -adotdota * thetab
-            - adotoa * kmodes**2 * 0.5 * deltag
-            + kmodes**2 * (cs2 * deltabdot - 0.25 * deltagdot)
+            - adotoa * kmode**2 * 0.5 * deltag
+            + kmode**2 * (cs2 * deltabdot - 0.25 * deltagdot)
         ) / (1.0 + pb43)
         # ... first oder approximation to baryon velocity
         thetabdot_hight += pb43 / (1.0 + pb43) * slip
@@ -164,28 +146,28 @@ def model_synchronous(*, tau, yin, param, kmodes, num_k, nvar, lmax, lmaxnu, nqm
 
     thetabdot = jax.lax.cond(tempb<1.0e4, calc_thetabdot_lowt, calc_thetabdot_hight)
 
-    f = f.at[:, 6].set( thetabdot )
+    f = f.at[6].set( thetabdot )
 
     # ... photon total intensity and polarization equations of motion
-    f = f.at[:, 7].set( deltagdot )
-    thetagdot = (-thetabdot - adotoa * thetab + kmodes**2 * cs2 * deltab) / pb43 + kmodes**2 * ( 0.25 * deltag - shearg )
-    f = f.at[:, 8].set( thetagdot )
+    f = f.at[7].set( deltagdot )
+    thetagdot = (-thetabdot - adotoa * thetab + kmode**2 * cs2 * deltab) / pb43 + kmode**2 * ( 0.25 * deltag - shearg )
+    f = f.at[8].set( thetagdot )
 
     def update_photons_uncoupled( f ):
         # ... treat baryons and photons as uncoupled
-        f = f.at[:, 9].set(
+        f = f.at[9].set(
             8.0 / 15.0 * thetag
-            - 0.6 * kmodes * y[:, 10]
-            - opac * y[:, 9]
+            - 0.6 * kmode * y[10]
+            - opac * y[9]
             + 4.0 / 15.0 * hdot
             + 8.0 / 5.0 * etadot
             + 0.1 * opac * polter
         )
 
         # ... polarization equations for l=1,2,3...
-        f = f.at[:, 8 + lmax].set( -kmodes * y[:, 9 + lmax] - opac * y[:, 8 + lmax] + 0.5 * opac * polter )
-        f = f.at[:, 9 + lmax].set( kmodes / 3.0 * (y[:, 8 + lmax] - 2.0 * y[:, 10 + lmax]) - opac * y[:, 9 + lmax] )
-        f = f.at[:, 10 + lmax].set( kmodes * (0.4 * y[:, 9 + lmax] - 0.6 * y[:, 11 + lmax]) - opac * y[:, 10 + lmax] + 0.1 * opac * polter)
+        f = f.at[8 + lmax].set( -kmode * y[9 + lmax] - opac * y[8 + lmax] + 0.5 * opac * polter )
+        f = f.at[9 + lmax].set( kmode / 3.0 * (y[8 + lmax] - 2.0 * y[10 + lmax]) - opac * y[9 + lmax] )
+        f = f.at[10 + lmax].set( kmode * (0.4 * y[9 + lmax] - 0.6 * y[11 + lmax]) - opac * y[10 + lmax] + 0.1 * opac * polter)
         # i = jnp.arange( 2, lmax - 1 )
         # ni = len(i)
         # f = f.at[:, 10:10+ni].set(
@@ -200,44 +182,44 @@ def model_synchronous(*, tau, yin, param, kmodes, num_k, nvar, lmax, lmaxnu, nqm
 
 
         for i in range(2, lmax - 1):
-            f = f.at[:, 8 + i].set(
-                kmodes * (1 / (2 * i + 2)) * ((i + 1) * y[:, 7 + i] - (i + 2) * y[:, 9 + i]) - opac * y[:, 8 + i]
+            f = f.at[8 + i].set(
+                kmode * (1 / (2 * i + 2)) * ((i + 1) * y[7 + i] - (i + 2) * y[9 + i]) - opac * y[8 + i]
             )
-            f = f.at[:, 9 + lmax + i].set(
-                kmodes
+            f = f.at[9 + lmax + i].set(
+                kmode
                 * (1 / (2 * i + 2))
-                * ((i + 1) * y[:, 8 + lmax + i] - (i + 2) * y[:, 10 + lmax + i])
-                - opac * y[:, 9 + lmax + i]
+                * ((i + 1) * y[8 + lmax + i] - (i + 2) * y[10 + lmax + i])
+                - opac * y[9 + lmax + i]
             )
         return f
 
     def update_photons_coupled( f ):
-        f = f.at[:, 9].set( 0.0 )
-        f = f.at[:, 8 + lmax].set( 0.0 )
-        f = f.at[:, 9 + lmax].set( 0.0 )
-        f = f.at[:, 10 + lmax].set( 0.0 )
+        f = f.at[9].set( 0.0 )
+        f = f.at[8 + lmax].set( 0.0 )
+        f = f.at[9 + lmax].set( 0.0 )
+        f = f.at[10 + lmax].set( 0.0 )
         for l in range(2, lmax - 1):
-            f = f.at[:, 8 + l].set( 0.0 )
-            f = f.at[:, 9 + lmax + l].set( 0.0 )
+            f = f.at[8 + l].set( 0.0 )
+            f = f.at[9 + lmax + l].set( 0.0 )
         return f
 
     f = jax.lax.cond( tempb < 1e4, update_photons_uncoupled, update_photons_coupled, f)
 
     # ... truncate moment expansion
-    f = f.at[:, 7 + lmax].set(
-        kmodes * y[:, 6 + lmax] - (lmax + 1) / tau * y[:, 7 + lmax] - opac * y[:, 7 + lmax]
+    f = f.at[7 + lmax].set(
+        kmode * y[6 + lmax] - (lmax + 1) / tau * y[7 + lmax] - opac * y[7 + lmax]
     )
-    f = f.at[:, 8 + 2 * lmax].set(
-        kmodes * y[:, 7 + 2 * lmax] - (lmax + 1) / tau * y[:, 8 + 2 * lmax] - opac * y[:, 8 + 2 * lmax]
+    f = f.at[8 + 2 * lmax].set(
+        kmode * y[7 + 2 * lmax] - (lmax + 1) / tau * y[8 + 2 * lmax] - opac * y[8 + 2 * lmax]
     )
 
     # ... Massless neutrino equations of motion
     deltardot = 4.0 / 3.0 * (-thetar - 0.5 * hdot)
-    f = f.at[:, 9 + 2 * lmax].set( deltardot )
-    thetardot = kmodes**2 * (0.25 * deltar - shearr)
-    f = f.at[:, 10 + 2 * lmax].set( thetardot )
-    f = f.at[:, 11 + 2 * lmax].set(
-        8.0 / 15.0 * thetar - 0.6 * kmodes * y[:, 12 + 2 * lmax] + 4.0 / 15.0 * hdot + 8.0 / 5.0 * etadot
+    f = f.at[9 + 2 * lmax].set( deltardot )
+    thetardot = kmode**2 * (0.25 * deltar - shearr)
+    f = f.at[10 + 2 * lmax].set( thetardot )
+    f = f.at[11 + 2 * lmax].set(
+        8.0 / 15.0 * thetar - 0.6 * kmode * y[12 + 2 * lmax] + 4.0 / 15.0 * hdot + 8.0 / 5.0 * etadot
     )
     # l = jnp.arange(2, lmax - 1)
     # nl = len(l)
@@ -245,42 +227,41 @@ def model_synchronous(*, tau, yin, param, kmodes, num_k, nvar, lmax, lmaxnu, nqm
     #     kmodes / (2 * l + 2) * ((l + 1) * y[:, 11 + 2 * lmax: 11+2*lmax+nl] - (l + 2) * y[:, 13 + 2 * lmax:13+2*lmax + nl])
     # )
     for l in range(2, lmax - 1):
-        f = f.at[:, 10 + 2 * lmax + l].set(
-            kmodes / (2 * l + 2) * ((l + 1) * y[:, 9 + 2 * lmax + l] - (l + 2) * y[:, 11 + 2 * lmax + l])
+        f = f.at[10 + 2 * lmax + l].set(
+            kmode / (2 * l + 2) * ((l + 1) * y[9 + 2 * lmax + l] - (l + 2) * y[11 + 2 * lmax + l])
         )
     # ... truncate moment expansion
-    f = f.at[:, 9 + 3 * lmax].set(
-        kmodes * y[:, 8 + 3 * lmax] - (lmax + 1) / tau * y[:, 9 + 3 * lmax]
+    f = f.at[9 + 3 * lmax].set(
+        kmode * y[8 + 3 * lmax] - (lmax + 1) / tau * y[9 + 3 * lmax]
     )
 
     # ... Massive neutrino equations of motion
     q = jnp.arange(1, nqmax + 1) - 0.5  # so dq == 1
-    aq = a[0] * param['amnu'] / q
+    aq = a * param['amnu'] / q
     v = 1 / jnp.sqrt(1 + aq**2)
     dlfdlq = -q / (1.0 + jnp.exp(-q))  # derivative of the Fermi-Dirac distribution
 
-    f = f.at[:, iq0 : iq1].set(
-        -kmodes[:, None] * v[None, :] * y[:, iq1 : iq2] + hdot[:, None] * dlfdlq / 6.0
+    f = f.at[iq0 : iq1].set(
+        -kmode * v * y[iq1 : iq2] + hdot* dlfdlq / 6.0
     )
-    f = f.at[:, iq1 : iq2].set(
-        kmodes[:, None] * v[None, :] * (y[:, iq0 : iq1] - 2.0 * y[:, iq2 : iq3]) / 3.0
+    f = f.at[iq1 : iq2].set(
+        kmode * v * (y[iq0 : iq1] - 2.0 * y[iq2 : iq3]) / 3.0
     )
-    f = f.at[:, iq2 : iq3].set(
-        kmodes[:, None] * v[None, :] * (2 * y[:, iq1 : iq2] - 3 * y[:, iq3 : iq4]) / 5.0
-            - (hdot[:, None] / 15 + 2 / 5 * etadot[:, None]) * dlfdlq
+    f = f.at[iq2 : iq3].set(
+        kmode * v * (2 * y[iq1 : iq2] - 3 * y[iq3 : iq4]) / 5.0 - (hdot / 15 + 2 / 5 * etadot) * dlfdlq
     )
 
     for l in range(3, lmaxnu - 1):
-        f = f.at[:, iq0 + l * nqmax : iq0 + (l + 1) * nqmax].set(
-            kmodes[:, None] * v[None, :] / (2 * l + 1) * (
-                l * y[:, iq0 + (l - 1) * nqmax : iq0 + (l) * nqmax]
-                - (l + 1) * y[:, iq0 + (l + 1) * nqmax : iq0 + (l + 2) * nqmax]
+        f = f.at[iq0 + l * nqmax : iq0 + (l + 1) * nqmax].set(
+            kmode * v / (2 * l + 1) * (
+                l * y[iq0 + (l - 1) * nqmax : iq0 + (l) * nqmax]
+                - (l + 1) * y[iq0 + (l + 1) * nqmax : iq0 + (l + 2) * nqmax]
             )
         )
 
     # Truncate moment expansion.
-    f = f.at[:, -nqmax :].set(
-        kmodes[:, None] * v[None, :] * y[:, -2 * nqmax : -nqmax] - (lmaxnu + 1) / tau * y[:, -nqmax :]
+    f = f.at[-nqmax :].set(
+        kmode * v * y[-2 * nqmax : -nqmax] - (lmaxnu + 1) / tau * y[-nqmax :]
     )
 
     return f.flatten()
@@ -387,11 +368,34 @@ def adiabatic_ics( *, tau: float, param, kmodes, num_k, nvar, lmax, nqmax):
     y = y.at[:, iq2:iq3].set( -0.5 * dlfdlq[None, :] * shearn[:, None] )
     y = y.at[:, iq3:].set( 0.0 )
     
-    return y.flatten()
+    return y
+
+def evolve_one_mode( *, y0, tau_start, tau_max, tau_out, param, kmode, lmax, lmaxnu, nqmax, rtol, atol ):
+
+    model = diffrax.ODETerm( 
+        lambda tau, y , params : 
+            model_synchronous( tau=tau, yin=y, param=param, kmode=kmode, lmax=lmax, lmaxnu=lmaxnu, nqmax=nqmax ) 
+    )
+
+    solver = diffrax.Kvaerno5()
+    saveat = diffrax.SaveAt(ts=tau_out)
+    stepsize_controller = diffrax.PIDController(rtol=rtol, atol=atol) #, pcoeff=0.4, icoeff=0.3, dcoeff=0)
+    sol = diffrax.diffeqsolve(
+        terms=model,
+        solver=solver,
+        t0=tau_start,
+        t1=tau_max,
+        dt0=tau_start/2,
+        y0=y0,
+        saveat=saveat,
+        stepsize_controller=stepsize_controller,
+        max_steps=1010,
+    )
+    return sol.ys
 
 
 @partial(jax.jit, static_argnames=("kmin","kmax","num_k","lmax","lmaxnu","nqmax","rtol","atol"))
-def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k : int, lmax : int = 10, lmaxnu : int = 10, nqmax : int = 15, rtol: float = 1e-3, atol: float = 1e-3 ):
+def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k : int, lmax : int = 10, lmaxnu : int = 10, nqmax : int = 15, rtol: float = 1e-6, atol: float = 1e-6 ):
     """evolve cosmological perturbations in the synchronous gauge
 
     Args:
@@ -421,41 +425,14 @@ def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k 
     
     # set initial conditions
     y0 = adiabatic_ics( tau=tau_start, param=param, kmodes=kmodes, num_k=num_k, nvar=nvar, lmax=lmax, nqmax=nqmax )
-    # dy0 = model_synchronous( tau=tau_start, yin=y0, param=param, kmodes=kmodes, num_k=num_k, nvar=nvar, lmax=lmax, lmaxnu=lmaxnu, nqmax=nqmax ) 
-    # return y0.reshape( (num_k, nvar) ), dy0.reshape((num_k, nvar)), kmodes
-
+    
     # solve ODEs 
-    model = diffrax.ODETerm( 
-        lambda tau, y , params : 
-            model_synchronous( tau=tau, yin=y, param=param, kmodes=kmodes, num_k=num_k, nvar=nvar, lmax=lmax, lmaxnu=lmaxnu, nqmax=nqmax ) 
-    )
-
-    # return y0.reshape( (num_k, nvar) ), model_synchronous( tau=100*tau_start, yin=y0, param=param, kmodes=kmodes, num_k=num_k, nvar=nvar, lmax=lmax, lmaxnu=lmaxnu, nqmax=nqmax ).reshape((num_k, nvar)), kmodes
-    # nsteps = 10
-    # dtau = (tau_max - tau_start) / nsteps
-    # tau  = tau_start
-    # ys = jnp.copy(y0)
-    # for n in range(nsteps):
-    #     dy0 = model_synchronous( tau=tau, yin=ys, param=param, kmodes=kmodes, num_k=num_k, nvar=nvar, lmax=lmax, lmaxnu=lmaxnu, nqmax=nqmax ) 
-    #     ys += dy0 * dtau
-    #     tau += dtau
-    # return ys.reshape( (num_k, nvar) ), kmodes, tau
-
-    # solver = diffrax.ImplicitEuler( nonlinear_solver=diffrax.NewtonNonlinearSolver(rtol=rtol,atol=atol) )
-    solver = diffrax.ImplicitEuler()
-    saveat = diffrax.SaveAt(ts=tau_out)
-    stepsize_controller = diffrax.PIDController(rtol=rtol, atol=atol)#, force_dtmin = 1e-2*(tau_max-tau_start))#, pcoeff=0.4, icoeff=0.3, dcoeff=0)
-    # stepsize_controller = diffrax.ConstantStepSize()
-    sol = diffrax.diffeqsolve(
-        terms=model,
-        solver=solver,
-        t0=tau_start,
-        t1=tau_max,
-        dt0=tau_start/2,
-        y0=y0,
-        saveat=saveat,
-        stepsize_controller=stepsize_controller,
-        max_steps=1010,
-    )
-    return sol.ys.reshape((num_k, nvar, nout)), kmodes, sol.ts
+    y1 = jax.vmap(
+        lambda k_y0 : evolve_one_mode( y0=k_y0[1:], tau_start=tau_start, tau_max=tau_max, tau_out=tau_out, 
+                                         param=param, kmode=k_y0[0], lmax=lmax, lmaxnu=lmaxnu, nqmax=nqmax, rtol=rtol, atol=atol ),
+                                         in_axes=0
+    )(jnp.append(kmodes[:,None],y0,axis=1))
+    
+    return y1, kmodes
+    # return sol.ys.reshape((num_k, nvar, nout)), kmodes, sol.ts
 

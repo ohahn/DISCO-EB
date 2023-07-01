@@ -428,5 +428,5 @@ class pt_synchronous:
         return np.array(sol["y"]).reshape((self.nmodes, self.nvar, self.nout)), np.array(sol["t"])
 
 
-        # return y0.reshape((self.nmodes, self.nvar)), model_synchronous(tau_start, y0, self).reshape((self.nmodes, self.nvar))
+        # return y0.reshape((self.nmodes, self.nvar)), model_synchronous(100*tau_start, y0, self).reshape((self.nmodes, self.nvar))
         # return y0.reshape((self.nmodes, self.nvar))
