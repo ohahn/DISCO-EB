@@ -40,14 +40,15 @@ def ionize(tempb: float, a: float, adot: float, dtau: float, xe: float, YHe: flo
     b1 = 1.0 + iswitch * bb
     bbxe = bb + xe - (1.0 - iswitch) * (bb * xe + aa * xe * xe)
     rat = iswitch * aa * bbxe / (b1 * b1)
-    xe = jax.lax.cond(rat < 1e-6,
+    #...  Prevent roundoff error
+    xe = jax.lax.cond(rat < 5e-5,
                       lambda: bbxe / b1 * (1.0 - rat),
                       lambda: b1 / (2.0 * iswitch * aa) * (jnp.sqrt(4.0 * rat + 1.0) - 1.0))
     return xe
 
 
 def ionHe(tempb: float, a: float, x0: float, x1: float, x2: float, YHe: float, H0: float, Omegab: float,
-          enforce_tolerance: bool = False, tol: float = 1e-12, n_iter_max: int = 5) -> Tuple[float, float]:
+          enforce_tolerance: bool = False, tol: float = 1e-12, n_iter_max: int = 6) -> Tuple[float, float]:
     """Compute the helium ionization fractions using the Saha equation
     """
     tion1 = 2.855e5
@@ -147,13 +148,16 @@ def compute(*, taumin: float, taumax: float, nthermo: int, Tcmb: float, YHe: flo
         # ... more accuracy is required (unlikely) then this can be iterated with
         # ... the solution of the ionization equation
         fe = (1.0 - YHe) * xe / (1.0 - 0.75 * YHe + (1.0 - YHe) * xe)
-        thomc = thomc0 * fe / adothalf / (ahalf * ahalf * ahalf)
+        thomc = thomc0 * fe / adothalf / ahalf**3
         etc = jnp.exp(-thomc * (new_a - a))
-        a2t = a * a * (tb - tg0) * etc - Tcmb / thomc * (1.0 - etc)
+        a2t = a**2 * (tb - tg0) * etc - Tcmb / thomc * (1.0 - etc)
+        # ... use 2nd order Taylor if fe is small to avoid numerical problems with single precision
+        a2t_expansion = (a - new_a) * Tcmb + a**2 * (tb - tg0) + (0.5*(a-new_a)**2 * Tcmb + a**2 * (a-new_a) * (tb-tg0))*thomc
+        a2t = jax.lax.cond( fe < 1e-3, lambda _: a2t_expansion, lambda _: a2t, operand=None)
 
         # Set new tb
-        new_tb = Tcmb / new_a + a2t / (new_a * new_a)
-
+        new_tb = Tcmb / new_a + a2t / new_a**2
+        
         # ... integrate ionization equation
         tbhalf = 0.5 * (tb + new_tb)
         new_xHII = ionize(tbhalf, ahalf, adothalf, dtau, xHII, YHe, H0, Omegab)
