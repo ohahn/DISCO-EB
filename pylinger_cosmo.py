@@ -133,14 +133,18 @@ def nu_perturb_jax( a : float, amnu: float, psi0, psi1, psi2, nq : int = 1000, q
     g3 = g3.at[1:].set( qdn * psi1 )
     g4 = g4.at[1:].set( qdn * psi2 * v )
 
-    g1_sp = jaxinterp.InterpolatedUnivariateSpline(qq, g1)
-    g01 = g1_sp.integral(0, qmax0)[0]
-    g2_sp = jaxinterp.InterpolatedUnivariateSpline(qq, g2)
-    g02 = g2_sp.integral(0, qmax0)[0]
-    g3_sp = jaxinterp.InterpolatedUnivariateSpline(qq, g3)
-    g03 = g3_sp.integral(0, qmax0)[0]
-    g4_sp = jaxinterp.InterpolatedUnivariateSpline(qq, g4)
-    g04 = g4_sp.integral(0, qmax0)[0]
+    # g1_sp = jaxinterp.InterpolatedUnivariateSpline(qq, g1)
+    # g01 = g1_sp.integral(0, qmax0)[0]
+    # g2_sp = jaxinterp.InterpolatedUnivariateSpline(qq, g2)
+    # g02 = g2_sp.integral(0, qmax0)[0]
+    # g3_sp = jaxinterp.InterpolatedUnivariateSpline(qq, g3)
+    # g03 = g3_sp.integral(0, qmax0)[0]
+    # g4_sp = jaxinterp.InterpolatedUnivariateSpline(qq, g4)
+    # g04 = g4_sp.integral(0, qmax0)[0]
+    g01 = jnp.trapz(g1, qq)
+    g02 = jnp.trapz(g2, qq)
+    g03 = jnp.trapz(g3, qq)
+    g04 = jnp.trapz(g4, qq)
 
     # Apply asymptotic corrrection for q>qmax0
     drhonu = (g01 + g1[-1] * 2 / qmax) / const

@@ -168,72 +168,34 @@ def model_synchronous(*, tau, yin, param, kmode, lmax, lmaxnu, nqmax, ):
         f = f.at[8 + lmax].set( -kmode * y[9 + lmax] - opac * y[8 + lmax] + 0.5 * opac * polter )
         f = f.at[9 + lmax].set( kmode / 3.0 * (y[8 + lmax] - 2.0 * y[10 + lmax]) - opac * y[9 + lmax] )
         f = f.at[10 + lmax].set( kmode * (0.4 * y[9 + lmax] - 0.6 * y[11 + lmax]) - opac * y[10 + lmax] + 0.1 * opac * polter)
-        # i = jnp.arange( 2, lmax - 1 )
-        # ni = len(i)
-        # f = f.at[:, 10:10+ni].set(
-        #         kmodes[:,None] * (1 / (2 * i[None,:] + 2)) * ((i[None,:] + 1) * y[:, 9:9+ni] - (i[None,:] + 2) * y[:, 11:11+ni]) - opac * y[:, 10:10+ni]
-        #     )
-        # f = f.at[:, 11+lmax:11+lmax+ni].set(
-        #         kmodes[:,None]
-        #         * (1 / (2 * i[None,:] + 2))
-        #         * ((i[None,:] + 1) * y[:, 10 + lmax:10 + lmax + ni] - (i[None,:] + 2) * y[:, 12 + lmax: 12 + lmax + ni])
-        #         - opac * y[:, 11 + lmax : 11 + lmax + ni]
-        #     )
+        
+        ell  = jnp.arange(2, lmax - 1)
+        f = f.at[8+ell].set( kmode  / (2 * ell + 2) * ((ell + 1) * y[7 + ell] - (ell + 2) * y[9 + ell]) - opac * y[8 + ell] )
+        f = f.at[9+lmax+ell].set( kmode  / (2 * ell + 2) * ((ell + 1) * y[8 + lmax + ell] - (ell + 2) * y[10 + lmax + ell]) - opac * y[9 + lmax + ell] )
 
-
-        for i in range(2, lmax - 1):
-            f = f.at[8 + i].set(
-                kmode * (1 / (2 * i + 2)) * ((i + 1) * y[7 + i] - (i + 2) * y[9 + i]) - opac * y[8 + i]
-            )
-            f = f.at[9 + lmax + i].set(
-                kmode
-                * (1 / (2 * i + 2))
-                * ((i + 1) * y[8 + lmax + i] - (i + 2) * y[10 + lmax + i])
-                - opac * y[9 + lmax + i]
-            )
         return f
 
     def update_photons_coupled( f ):
-        f = f.at[9].set( 0.0 )
-        f = f.at[8 + lmax].set( 0.0 )
-        f = f.at[9 + lmax].set( 0.0 )
-        f = f.at[10 + lmax].set( 0.0 )
-        for l in range(2, lmax - 1):
-            f = f.at[8 + l].set( 0.0 )
-            f = f.at[9 + lmax + l].set( 0.0 )
+        # do nothing since array is already initialized to zero
         return f
 
     f = jax.lax.cond( tempb < 1e4, update_photons_uncoupled, update_photons_coupled, f)
 
     # ... truncate moment expansion
-    f = f.at[7 + lmax].set(
-        kmode * y[6 + lmax] - (lmax + 1) / tau * y[7 + lmax] - opac * y[7 + lmax]
-    )
-    f = f.at[8 + 2 * lmax].set(
-        kmode * y[7 + 2 * lmax] - (lmax + 1) / tau * y[8 + 2 * lmax] - opac * y[8 + 2 * lmax]
-    )
+    f = f.at[7 + lmax].set( kmode * y[6 + lmax] - (lmax + 1) / tau * y[7 + lmax] - opac * y[7 + lmax] )
+    f = f.at[8 + 2 * lmax].set( kmode * y[7 + 2 * lmax] - (lmax + 1) / tau * y[8 + 2 * lmax] - opac * y[8 + 2 * lmax] )
 
     # ... Massless neutrino equations of motion
     deltardot = 4.0 / 3.0 * (-thetar - 0.5 * hdot)
     f = f.at[9 + 2 * lmax].set( deltardot )
     thetardot = kmode**2 * (0.25 * deltar - shearr)
     f = f.at[10 + 2 * lmax].set( thetardot )
-    f = f.at[11 + 2 * lmax].set(
-        8.0 / 15.0 * thetar - 0.6 * kmode * y[12 + 2 * lmax] + 4.0 / 15.0 * hdot + 8.0 / 5.0 * etadot
-    )
-    # l = jnp.arange(2, lmax - 1)
-    # nl = len(l)
-    # f = f.at[:, 12 + 2 * lmax : 12 + 2 * lmax + nl].set(
-    #     kmodes / (2 * l + 2) * ((l + 1) * y[:, 11 + 2 * lmax: 11+2*lmax+nl] - (l + 2) * y[:, 13 + 2 * lmax:13+2*lmax + nl])
-    # )
-    for l in range(2, lmax - 1):
-        f = f.at[10 + 2 * lmax + l].set(
-            kmode / (2 * l + 2) * ((l + 1) * y[9 + 2 * lmax + l] - (l + 2) * y[11 + 2 * lmax + l])
-        )
+    f = f.at[11 + 2 * lmax].set( 8.0 / 15.0 * thetar - 0.6 * kmode * y[12 + 2 * lmax] + 4.0 / 15.0 * hdot + 8.0 / 5.0 * etadot )
+    ell = jnp.arange(2, lmax - 1)
+    f = f.at[10 + 2 * lmax + ell].set( kmode / (2 * ell + 2) * ((ell + 1) * y[9 + 2 * lmax + ell] - (ell + 2) * y[11 + 2 * lmax + ell]) )
+    
     # ... truncate moment expansion
-    f = f.at[9 + 3 * lmax].set(
-        kmode * y[8 + 3 * lmax] - (lmax + 1) / tau * y[9 + 3 * lmax]
-    )
+    f = f.at[9 + 3 * lmax].set( kmode * y[8 + 3 * lmax] - (lmax + 1) / tau * y[9 + 3 * lmax] )
 
     # ... Massive neutrino equations of motion
     q = jnp.arange(1, nqmax + 1) - 0.5  # so dq == 1
