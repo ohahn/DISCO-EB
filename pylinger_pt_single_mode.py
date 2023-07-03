@@ -4,9 +4,10 @@ import jax_cosmo.scipy.interpolate as jaxinterp
 from pylinger_cosmo import cosmo, nu_perturb_jax
 from functools import partial
 import diffrax
+# from scipy.integrate import solve_ivp
 # import equinox as eqx  # https://github.com/patrick-kidger/equinox
 
-# @partial(jax.jit, static_argnames=('kmodes', 'lmax', 'lmaxnu', 'nqmax'))
+@partial(jax.jit, static_argnames=('lmax', 'lmaxnu', 'nqmax'))
 def model_synchronous(*, tau, yin, param, kmode, lmax, lmaxnu, nqmax, ):
     iq0 = 11 + 3 * lmax
     iq1 = iq0 + nqmax
@@ -332,6 +333,7 @@ def adiabatic_ics( *, tau: float, param, kmodes, num_k, nvar, lmax, nqmax):
     
     return y
 
+@partial(jax.jit, static_argnames=("lmax","lmaxnu","nqmax","rtol","atol"))
 def evolve_one_mode( *, y0, tau_start, tau_max, tau_out, param, kmode, lmax, lmaxnu, nqmax, rtol, atol ):
 
     model = diffrax.ODETerm( 
@@ -351,13 +353,13 @@ def evolve_one_mode( *, y0, tau_start, tau_max, tau_out, param, kmode, lmax, lma
         y0=y0,
         saveat=saveat,
         stepsize_controller=stepsize_controller,
-        max_steps=1010,
+        max_steps=10010,
     )
     return sol.ys
 
 
-@partial(jax.jit, static_argnames=("kmin","kmax","num_k","lmax","lmaxnu","nqmax","rtol","atol"))
-def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k : int, lmax : int = 10, lmaxnu : int = 10, nqmax : int = 15, rtol: float = 1e-6, atol: float = 1e-6 ):
+# @partial(jax.jit, static_argnames=("num_k","lmax","lmaxnu","nqmax","rtol","atol"))
+def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k : int, lmax : int = 8, lmaxnu : int = 8, nqmax : int = 15, rtol: float = 1e-5, atol: float = 1e-5 ):
     """evolve cosmological perturbations in the synchronous gauge
 
     Args:
@@ -391,9 +393,29 @@ def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k 
     # solve ODEs 
     y1 = jax.vmap(
         lambda k_y0 : evolve_one_mode( y0=k_y0[1:], tau_start=tau_start, tau_max=tau_max, tau_out=tau_out, 
-                                         param=param, kmode=k_y0[0], lmax=lmax, lmaxnu=lmaxnu, nqmax=nqmax, rtol=rtol, atol=atol ),
-                                         in_axes=0
+                                        param=param, kmode=k_y0[0], lmax=lmax, lmaxnu=lmaxnu, nqmax=nqmax, rtol=rtol, atol=atol ),
+                                        in_axes=0
     )(jnp.append(kmodes[:,None],y0,axis=1))
+    # else:
+    #     y1 = jnp.zeros((num_k,nvar))
+
+    #     for ik,kmode in enumerate(kmodes):
+    #         def model_( args ): 
+    #             return model_synchronous( tau=args[0], yin=args[1:], param=param, kmode=kmode, lmax=lmax, lmaxnu=lmaxnu, nqmax=nqmax ).flatten()
+        
+    #         def model( tau, y ): 
+    #             return model_synchronous( tau=tau, yin=y, param=param, kmode=kmode, lmax=lmax, lmaxnu=lmaxnu, nqmax=nqmax ).flatten()
+
+    #         def jac_( y ):
+    #             return jax.jacfwd( model_ )( y )
+            
+    #         def jac( tau, y ):
+    #             ty = jnp.append(jnp.array([tau]),y)
+    #             j = jac_( ty ) 
+    #             return jnp.array(j[:,1:])
+            
+    #         sol = solve_ivp( model, (tau_start, tau_max), y0[ik,:], jac=jac, method='BDF', rtol=rtol, atol=atol )
+    #         y1 = y1.at[ik,...].set( sol.y[:,-1] )
     
     return y1, kmodes
     # return sol.ys.reshape((num_k, nvar, nout)), kmodes, sol.ts
