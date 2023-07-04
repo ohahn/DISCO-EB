@@ -281,12 +281,12 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
     f = f.at[idxr+0].set( deltarprime )
     thetarprime = kmode**2 * (0.25 * deltar - shearr)
     f = f.at[idxr+1].set( thetarprime )
-    f = f.at[idxr+2].set( 8.0 / 15.0 * thetar - 0.6 * kmode * y[idxr+3] + 4.0 / 15.0 * hprime + 8.0 / 5.0 * etaprime )
-    ell = jnp.arange(2, lmaxr - 1)
-    f = f.at[idxr+ell+1].set( kmode / (2 * ell + 2) * ((ell + 1) * y[idxr+ell] - (ell + 2) * y[idxr+ell+2]) )
+    f = f.at[idxr+2].set( 8./15. * (thetar + kmode**2 * alpha) - 0.6 * kmode * y[idxr+3] )
+    ell = jnp.arange(3, lmaxr)
+    f = f.at[idxr+ell].set( kmode / (2 * ell + 1) * (ell * y[idxr+ell-1] - (ell + 1) * y[idxr+ell+1]) )
     
     # ... truncate moment expansion
-    f = f.at[idxr + lmaxr].set( kmode * y[idxr+lmaxr-1] - (lmaxr + 1) / tau * y[idxr+lmaxr] )
+    f = f.at[idxr+lmaxr].set( kmode * y[idxr+lmaxr-1] - (lmaxr + 1) / tau * y[idxr+lmaxr] )
 
     # --- Massive neutrino equations of motion --------------------------------------------------------
     q = jnp.arange(1, nqmax + 1) - 0.5  # so dq == 1
@@ -452,7 +452,7 @@ def evolve_one_mode( *, y0, tau_start, tau_max, tau_out, param, kmode, lmaxg, lm
 # @partial(jax.jit, static_argnames=("num_k","lmaxg","lmaxgp", "lmaxr", "lmaxnu","nqmax","rtol","atol"))
 def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k : int, \
                          lmaxg : int = 4, lmaxgp : int = 4, lmaxr : int = 4, lmaxnu : int = 4, \
-                         nqmax : int = 15, rtol: float = 1e-5, atol: float = 1e-5 ):
+                         nqmax : int = 15, rtol: float = 1e-5, atol: float = 1e-4 ):
     """evolve cosmological perturbations in the synchronous gauge
 
     Parameters
