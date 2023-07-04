@@ -254,7 +254,7 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
         deltagprime = 4.0 / 3.0 * (-thetag - 0.5 * hprime)
         f = f.at[idxg+0].set( deltagprime )
         # ... photon velocity
-        thetagprime = -(thetab + aprimeoa * thetab - kmode**2 * cs2 * deltab) / pb43  + kmode**2 * (0.25 * deltag -s2_squared * tca_shearg)
+        thetagprime = -(thetabprime + aprimeoa * thetab - kmode**2 * cs2 * deltab) / pb43  + kmode**2 * (0.25 * deltag -s2_squared * tca_shearg)
         f = f.at[idxg+1].set( thetagprime )
 
         return f
@@ -271,6 +271,8 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
             jnp.logical_and( tauc/tauh > tight_coupling_trigger_tau_c_over_tau_h,
                             tauc/tauk > 0.1*tight_coupling_trigger_tau_c_over_tau_k)),
         calc_baryon_photon_uncoupled, calc_baryon_photon_tca, f )
+    
+    # f = calc_baryon_photon_tca( f )
     
     
     # --- Massless neutrino equations of motion -------------------------------------------------------
