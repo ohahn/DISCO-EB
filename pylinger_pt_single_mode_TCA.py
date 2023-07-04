@@ -5,8 +5,8 @@ from pylinger_cosmo import cosmo, nu_perturb_jax
 from functools import partial
 import diffrax
 
-@partial(jax.jit, static_argnames=('lmax', 'lmaxnu', 'nqmax'))
-def model_synchronous(*, tau, yin, param, kmode, lmax, lmaxnu, nqmax, ):
+@partial(jax.jit, static_argnames=('lmaxg', 'lmaxgp', 'lmaxr', 'lmaxnu', 'nqmax'))
+def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, nqmax, ):
     """Solve the synchronous gauge perturbation equations for a single mode.
 
     Parameters
@@ -19,12 +19,16 @@ def model_synchronous(*, tau, yin, param, kmode, lmax, lmaxnu, nqmax, ):
         dictionary of parameters and interpolated background functions
     kmode : float
         wavenumber of mode
-    lmax : int
-        maximum Boltzmann hierarchy multipole
+    lmaxg : int
+        maximum photon temperature hierarchy multipole
+    lmaxgp : int
+        maximum photon polarization hierarchy multipole
+    lmaxr : int
+        maximum massless neutrino hierarchy multipole
     lmaxnu : int
         maximum neutrino hierarchy multipole
     nqmax : int
-        maximum number of quadrature points for Fermi-Dirac integrals
+        maximum number of momentum bins for massive neutrinos
 
     Returns
     -------
@@ -32,7 +36,7 @@ def model_synchronous(*, tau, yin, param, kmode, lmax, lmaxnu, nqmax, ):
         RHS of perturbation equations
     """
 
-    iq0 = 11 + 3 * lmax
+    iq0 = 11 + lmaxg + lmaxgp + lmaxr
     iq1 = iq0 + nqmax
     iq2 = iq1 + nqmax
     iq3 = iq2 + nqmax
@@ -76,12 +80,12 @@ def model_synchronous(*, tau, yin, param, kmode, lmax, lmaxnu, nqmax, ):
     shearg = y[9] / 2.0
 
     # ... polarization term
-    polter = y[9] + y[8 + lmax] + y[10 + lmax]
+    polter = y[9] + y[8 + lmaxg] + y[10 + lmaxg]
 
     # ... massless neutrinos
-    deltar = y[9 + 2 * lmax]
-    thetar = y[10 + 2 * lmax]
-    shearr = y[11 + 2 * lmax] / 2.0
+    deltar = y[ 9 + lmaxg + lmaxgp]
+    thetar = y[10 + lmaxg + lmaxgp]
+    shearr = y[11 + lmaxg + lmaxgp] / 2.0
 
     # ... evaluate thermodynamics
     tempb = param['tempb_of_tau_spline']( tau )
@@ -193,23 +197,23 @@ def model_synchronous(*, tau, yin, param, kmode, lmax, lmaxnu, nqmax, ):
         f = f.at[9].set( sheargprime )
 
         # photon temperature l>=3, BLT11 eq. (2.4d)
-        ell  = jnp.arange(2, lmax - 1)
+        ell  = jnp.arange(2, lmaxg - 1)
         f = f.at[8+ell].set( kmode  / (2 * ell + 2) * ((ell + 1) * y[7 + ell] - (ell + 2) * y[9 + ell]) - opac * y[8 + ell] )
         # photon temperature hierarchy truncation, BLT11 eq. (2.5)
-        f = f.at[7 + lmax].set( kmode * y[6 + lmax] - (lmax + 1) / tau * y[7 + lmax] - opac * y[7 + lmax] )
+        f = f.at[7 + lmaxg].set( kmode * y[6 + lmaxg] - (lmaxg + 1) / tau * y[7 + lmaxg] - opac * y[7 + lmaxg] )
     
         # polarization equations, BLT11 eq. (2.4e)
         # photon polarization l=0
-        f = f.at[8 + lmax].set( -kmode * y[9 + lmax] - opac * y[8 + lmax] + 0.5 * opac * polter )
+        f = f.at[8 + lmaxg].set( -kmode * y[9 + lmaxg] - opac * y[8 + lmaxg] + 0.5 * opac * polter )
         # photon polarization l=1
-        f = f.at[9 + lmax].set( kmode / 3.0 * (y[8 + lmax] - 2.0 * y[10 + lmax]) - opac * y[9 + lmax] )
+        f = f.at[9 + lmaxg].set( kmode / 3.0 * (y[8 + lmaxg] - 2.0 * y[10 + lmaxg]) - opac * y[9 + lmaxg] )
         # photon polarization l=2
-        f = f.at[10 + lmax].set( kmode * (0.4 * y[9 + lmax] - 0.6 * y[11 + lmax]) - opac * (y[10 + lmax] - 0.1 * s_l2 * polter))
+        f = f.at[10 + lmaxg].set( kmode * (0.4 * y[9 + lmaxg] - 0.6 * y[11 + lmaxg]) - opac * (y[10 + lmaxg] - 0.1 * s_l2 * polter))
         # photon polarization lmax>l>=3
-        ell  = jnp.arange(2, lmax - 1)
-        f = f.at[9+lmax+ell].set( kmode  / (2 * ell + 2) * ((ell + 1) * y[8 + lmax + ell] - (ell + 2) * y[10 + lmax + ell]) - opac * y[9 + lmax + ell] )
+        ell  = jnp.arange(2, lmaxgp - 1)
+        f = f.at[9+lmaxg+ell].set( kmode  / (2 * ell + 2) * ((ell + 1) * y[8 + lmaxg + ell] - (ell + 2) * y[10 + lmaxg + ell]) - opac * y[9 + lmaxg + ell] )
         # photon polarization hierarchy truncation
-        f = f.at[8 + 2 * lmax].set( kmode * y[7 + 2 * lmax] - (lmax + 1) / tau * y[8 + 2 * lmax] - opac * y[8 + 2 * lmax] )
+        f = f.at[8 + lmaxg + lmaxgp].set( kmode * y[7 + lmaxg + lmaxgp] - (lmaxgp + 1) / tau * y[8 + lmaxg + lmaxgp] - opac * y[8 + lmaxg + lmaxgp] )
         
         return f
     
@@ -257,21 +261,23 @@ def model_synchronous(*, tau, yin, param, kmode, lmax, lmaxnu, nqmax, ):
 
     tauh = 1./(aprimeoa)
     tauk = 1./kmode
-    tca_condition = jnp.logical_and(jnp.logical_and(tauc/tauh < tight_coupling_trigger_tau_c_over_tau_h, tauc/tauk < tight_coupling_trigger_tau_c_over_tau_k),opac<1e-4)
+    # tca_condition = jnp.logical_and(jnp.logical_and(tauc/tauh < tight_coupling_trigger_tau_c_over_tau_h, tauc/tauk < tight_coupling_trigger_tau_c_over_tau_k),opac>1e-4)
+    tca_condition = jnp.logical_and(tauc/tauh < tight_coupling_trigger_tau_c_over_tau_h, tauc/tauk < tight_coupling_trigger_tau_c_over_tau_k)
 
     f = jax.lax.cond(tca_condition, calc_baryon_photon_tca, calc_baryon_photon_uncoupled, f )
 
     # --- Massless neutrino equations of motion -------------------------------------------------------
+    idxr = 9 + lmaxg + lmaxgp
     deltarprime = 4.0 / 3.0 * (-thetar - 0.5 * hprime)
-    f = f.at[9 + 2 * lmax].set( deltarprime )
+    f = f.at[idxr+0].set( deltarprime )
     thetarprime = kmode**2 * (0.25 * deltar - shearr)
-    f = f.at[10 + 2 * lmax].set( thetarprime )
-    f = f.at[11 + 2 * lmax].set( 8.0 / 15.0 * thetar - 0.6 * kmode * y[12 + 2 * lmax] + 4.0 / 15.0 * hprime + 8.0 / 5.0 * etaprime )
-    ell = jnp.arange(2, lmax - 1)
-    f = f.at[10 + 2 * lmax + ell].set( kmode / (2 * ell + 2) * ((ell + 1) * y[9 + 2 * lmax + ell] - (ell + 2) * y[11 + 2 * lmax + ell]) )
+    f = f.at[idxr+1].set( thetarprime )
+    f = f.at[idxr+2].set( 8.0 / 15.0 * thetar - 0.6 * kmode * y[idxr+3] + 4.0 / 15.0 * hprime + 8.0 / 5.0 * etaprime )
+    ell = jnp.arange(2, lmaxr - 1)
+    f = f.at[idxr + 1 + ell].set( kmode / (2 * ell + 2) * ((ell + 1) * y[idxr + ell] - (ell + 2) * y[idxr + 2 + ell]) )
     
     # ... truncate moment expansion
-    f = f.at[9 + 3 * lmax].set( kmode * y[8 + 3 * lmax] - (lmax + 1) / tau * y[9 + 3 * lmax] )
+    f = f.at[idxr + lmaxr].set( kmode * y[idxr + lmaxr-1] - (lmaxr + 1) / tau * y[idxr + lmaxr] )
 
     # --- Massive neutrino equations of motion --------------------------------------------------------
     q = jnp.arange(1, nqmax + 1) - 0.5  # so dq == 1
@@ -305,9 +311,9 @@ def model_synchronous(*, tau, yin, param, kmode, lmax, lmaxnu, nqmax, ):
     return f.flatten()
 
 # @partial(jax.jit, static_argnames=('num_k', 'nvar', 'lmax', 'nqmax'))
-def adiabatic_ics( *, tau: float, param, kmodes, num_k, nvar, lmax, nqmax):
+def adiabatic_ics( *, tau: float, param, kmodes, num_k, nvar, lmaxg, lmaxgp, lmaxr, lmaxnu, nqmax):
     """Initial conditions for adiabatic perturbations"""
-    iq0 = 11 + 3 * lmax
+    iq0 = 11 + lmaxg + lmaxgp + lmaxr
     iq1 = iq0 + nqmax
     iq2 = iq1 + nqmax
     iq3 = iq2 + nqmax
@@ -379,20 +385,20 @@ def adiabatic_ics( *, tau: float, param, kmodes, num_k, nvar, lmax, nqmax):
     # ... Photons (total intensity and polarization)
     y = y.at[:, 7].set( deltag )
     y = y.at[:, 8].set( thetag )
-    y = y.at[:, 8 + lmax].set( 0.0 ) # shearg
-    y = y.at[:, 9 + lmax].set( 0.0 ) # polarization term
+    y = y.at[:, 8 + lmaxg].set( 0.0 ) # shearg
+    y = y.at[:, 9 + lmaxg].set( 0.0 ) # polarization term
 
     # for l in range(1, lmax):
     #     y = y.at[:, 8 + l].set( 0.0 )
     #     y = y.at[:, 9 + lmax + l].set( 0.0 )
 
     # ... massless neutrinos
-    y = y.at[:, 9 + 2 * lmax].set( deltar )
-    y = y.at[:, 10 + 2 * lmax].set( thetar )
-    y = y.at[:, 11 + 2 * lmax].set( shearr * 2.0 )
+    y = y.at[:,  9 + lmaxg + lmaxgp].set( deltar )
+    y = y.at[:, 10 + lmaxg + lmaxgp].set( thetar )
+    y = y.at[:, 11 + lmaxg + lmaxgp].set( shearr * 2.0 )
 
     # for l in range(2, lmax):
-    y = y.at[:, 10 + 2 * (lmax + 1) :].set( 0.0 )
+    y = y.at[:, 10 + (lmaxg + 1) + (lmaxgp + 1):].set( 0.0 )
 
     # ... massive neutrinos
     # if params.cp.Nmnu > 0:
@@ -408,12 +414,13 @@ def adiabatic_ics( *, tau: float, param, kmodes, num_k, nvar, lmax, nqmax):
     
     return y
 
-@partial(jax.jit, static_argnames=("lmax","lmaxnu","nqmax","rtol","atol"))
-def evolve_one_mode( *, y0, tau_start, tau_max, tau_out, param, kmode, lmax, lmaxnu, nqmax, rtol, atol ):
+
+@partial(jax.jit, static_argnames=('lmaxg', 'lmaxgp', 'lmaxr', 'lmaxnu', 'nqmax', 'rtol', 'atol'))
+def evolve_one_mode( *, y0, tau_start, tau_max, tau_out, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, nqmax, rtol, atol ):
 
     model = diffrax.ODETerm( 
         lambda tau, y , params : 
-            model_synchronous( tau=tau, yin=y, param=param, kmode=kmode, lmax=lmax, lmaxnu=lmaxnu, nqmax=nqmax ) 
+            model_synchronous( tau=tau, yin=y, param=param, kmode=kmode, lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax ) 
     )
 
     solver = diffrax.Kvaerno5()
@@ -433,27 +440,48 @@ def evolve_one_mode( *, y0, tau_start, tau_max, tau_out, param, kmode, lmax, lma
     return sol.ys
 
 
-# @partial(jax.jit, static_argnames=("num_k","lmax","lmaxnu","nqmax","rtol","atol"))
-def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k : int, lmax : int = 12, lmaxnu : int = 12, nqmax : int = 15, rtol: float = 1e-5, atol: float = 1e-5 ):
+# @partial(jax.jit, static_argnames=("num_k","lmaxg","lmaxgp", "lmaxr", "lmaxnu","nqmax","rtol","atol"))
+def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k : int, \
+                         lmaxg : int = 4, lmaxgp : int = 4, lmaxr : int = 4, lmaxnu : int = 4, \
+                         nqmax : int = 15, rtol: float = 1e-5, atol: float = 1e-5 ):
     """evolve cosmological perturbations in the synchronous gauge
 
-    Args:
-        param (_type_): _description_
-        aexp_out (_type_): _description_
-        kmin (float): _description_
-        kmax (float): _description_
-        num_k (int): _description_
-        lmax (int, optional): _description_. Defaults to 32.
-        lmaxnu (int, optional): _description_. Defaults to 32.
-        nqmax (int, optional): _description_. Defaults to 15.
-        rtol (float, optional): _description_. Defaults to 1e-3.
-        atol (float, optional): _description_. Defaults to 1e-4.
+    Parameters
+    ----------
+    param : dict
+        dictionary of parameters and interpolated functions
+    aexp_out : array
+        array of scale factors at which to output
+    kmin : float
+        minimum wavenumber
+    kmax : float
+        maximum wavenumber
+    num_k : int
+        number of wavenumbers
+    lmaxg : int
+        maximum multipole for photon temperature
+    lmaxgp : int
+        maximum multipole for photon polarization
+    lmaxr : int
+        maximum multipole for massless neutrinos
+    lmaxnu : int
+        maximum multipole for massive neutrinos
+    nqmax : int
+        number of momentum bins for massive neutrinos
+    rtol : float
+        relative tolerance for ODE solver
+    atol : float
+        absolute tolerance for ODE solver
 
-    Returns:
-        _type_: _description_
+    Returns
+    -------
+    y : array
+        array of shape (num_k, nout, nvar) containing the perturbations
+    k : array
+        array of shape (num_k) containing the wavenumbers
     """
     kmodes = jnp.geomspace(kmin, kmax, num_k)
-    nvar   = 7 + 3 * (lmax + 1) + nqmax * (lmaxnu + 1)
+    nvar   = 7 + (lmaxg + 1) + (lmaxgp + 1) + (lmaxr + 1) + nqmax * (lmaxnu + 1)
 
     # determine output times from aexp_out
     tau_out = jax.vmap( lambda a: param['tau_of_a_spline'](a) )(aexp_out)
@@ -463,12 +491,14 @@ def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k 
     param['nout'] = nout
     
     # set initial conditions
-    y0 = adiabatic_ics( tau=tau_start, param=param, kmodes=kmodes, num_k=num_k, nvar=nvar, lmax=lmax, nqmax=nqmax )
+    y0 = adiabatic_ics( tau=tau_start, param=param, kmodes=kmodes, num_k=num_k, nvar=nvar, 
+                       lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax )
     
     # solve ODEs 
     y1 = jax.vmap(
         lambda k_y0 : evolve_one_mode( y0=k_y0[1:], tau_start=tau_start, tau_max=tau_max, tau_out=tau_out, 
-                                        param=param, kmode=k_y0[0], lmax=lmax, lmaxnu=lmaxnu, nqmax=nqmax, rtol=rtol, atol=atol ),
+                                        param=param, kmode=k_y0[0], lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, 
+                                        lmaxnu=lmaxnu, nqmax=nqmax, rtol=rtol, atol=atol ),
                                         in_axes=0
     )(jnp.append(kmodes[:,None],y0,axis=1))
     
