@@ -79,9 +79,6 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
     thetag = y[8]
     shearg = y[9] / 2.0
 
-    # ... polarization term
-    polter = y[9] + y[8 + lmaxg] + y[10 + lmaxg]
-
     # ... massless neutrinos
     deltar = y[ 9 + lmaxg + lmaxgp]
     thetar = y[10 + lmaxg + lmaxgp]
@@ -187,6 +184,8 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
         # --- photon equations of motion, MB95 eqs. (63) ---------------------------------------------
         idxg  = 7
         idxgp = 7 + (lmaxg+1)
+        # ... polarization term
+        polter = y[idxg+2] + y[idxgp+0] + y[idxgp+2]
         # ... photon density, BLT11 eq. (2.4a)
         deltagprime = 4.0 / 3.0 * (-thetag - 0.5 * hprime)
         f = f.at[idxg+0].set( deltagprime )
@@ -200,8 +199,8 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
         f = f.at[idxg+2].set( sheargprime )
 
         # photon temperature l>=3, BLT11 eq. (2.4d)
-        ell  = jnp.arange(2, lmaxg - 1)
-        f = f.at[idxg+ell+1].set( kmode  / (2 * ell + 2) * ((ell + 1) * y[idxg+ell] - (ell + 2) * y[idxg+ell+2]) - opac * y[idxg+ell+1] )
+        ell  = jnp.arange(3, lmaxg )
+        f = f.at[idxg+ell].set( kmode  / (2 * ell + 1) * (ell * y[idxg+ell-1] - (ell + 1) * y[idxg+ell+1]) - opac * y[idxg+ell] )
         # photon temperature hierarchy truncation, BLT11 eq. (2.5)
         f = f.at[idxg+lmaxg].set( kmode * y[idxg+lmaxg-1] - (lmaxg + 1) / tau * y[idxg+lmaxg] - opac * y[idxg+lmaxg] )
     
@@ -213,8 +212,8 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
         # photon polarization l=2
         f = f.at[idxgp+2].set( kmode * (0.4 * y[idxgp+1] - 0.6 * y[idxgp+3]) - opac * (y[idxgp+2] - 0.1 * s_l2 * polter))
         # photon polarization lmax>l>=3
-        ell  = jnp.arange(2, lmaxgp - 1)
-        f = f.at[idxgp+ell+1].set( kmode  / (2 * ell + 2) * ((ell + 1) * y[idxgp+ell] - (ell + 2) * y[idxgp+ell+2]) - opac * y[idxgp+ell+1] )
+        ell  = jnp.arange(3, lmaxgp)
+        f = f.at[idxgp+ell].set( kmode  / (2 * ell + 1) * (ell * y[idxgp+ell-1] - (ell + 1) * y[idxgp+ell+1]) - opac * y[idxgp+ell] )
         # photon polarization hierarchy truncation
         f = f.at[idxgp+lmaxgp].set( kmode * y[idxgp+lmaxgp-1] - (lmaxgp + 1) / tau * y[idxgp+lmaxgp] - opac * y[idxgp+lmaxgp] )
         
@@ -272,6 +271,7 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
             jnp.logical_and( tauc/tauh > tight_coupling_trigger_tau_c_over_tau_h,
                             tauc/tauk > 0.1*tight_coupling_trigger_tau_c_over_tau_k)),
         calc_baryon_photon_uncoupled, calc_baryon_photon_tca, f )
+    
     
     # --- Massless neutrino equations of motion -------------------------------------------------------
     idxr = 9 + lmaxg + lmaxgp
@@ -432,7 +432,7 @@ def evolve_one_mode( *, y0, tau_start, tau_max, tau_out, param, kmode, lmaxg, lm
 
     solver = diffrax.Kvaerno5()
     saveat = diffrax.SaveAt(ts=tau_out)
-    stepsize_controller = diffrax.PIDController(rtol=rtol, atol=atol) #, pcoeff=0.4, icoeff=0.3, dcoeff=0)
+    stepsize_controller = diffrax.PIDController(rtol=rtol, atol=atol, pcoeff=0.4, icoeff=0.3, dcoeff=0)
     sol = diffrax.diffeqsolve(
         terms=model,
         solver=solver,
