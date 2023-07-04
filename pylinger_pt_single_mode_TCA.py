@@ -36,7 +36,7 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
         RHS of perturbation equations
     """
 
-    iq0 = 11 + lmaxg + lmaxgp + lmaxr
+    iq0 = 10 + lmaxg + lmaxgp + lmaxr
     iq1 = iq0 + nqmax
     iq2 = iq1 + nqmax
     iq3 = iq2 + nqmax
@@ -165,55 +165,58 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
     alphaprime = -3*dgshear/(2*kmode**2) + eta - 2*aprimeoa*alpha
     alphaprime -=  9/2 * a**2/kmode**2 * 4/3*16/45/opac * (thetag+kmode**2*alpha) * param['grhog']
 
-    # ... cdm equations of motion
+    # ... cdm equations of motion, MB95 eq. (42)
     deltacprime = -thetac - 0.5 * hprime
     f = f.at[3].set( deltacprime )
-    thetacprime = -aprimeoa * thetac
+    thetacprime = -aprimeoa * thetac  # thetac = 0 in synchronous gauge!
     f = f.at[4].set( thetacprime )
 
 
     def calc_baryon_photon_uncoupled( f ):
-        # === treat baryons and photons as uncoupled =================================================
-        # --- baryon equations of motion -------------------------------------------------------------
+        # === treat baryons and photons as uncoupled ================================================
+        idxb = 5
+        # --- baryon equations of motion, MB95 eqs. (66) ---------------------------------------------
         # ... baryon density, BLT11 eq. (2.1a)
         deltabprime = -thetab - 0.5 * hprime
-        f = f.at[5].set( deltabprime )
+        f = f.at[idxb+0].set( deltabprime )
         # ... baryon velocity, BLT11 eq. (2.1b)
         thetabprime = -aprimeoa * thetab + kmode**2 * cs2 * deltab \
                     + pb43 * opac * (thetag - thetab)
-        f = f.at[6].set( thetabprime )
+        f = f.at[idxb+1].set( thetabprime )
 
-        # --- photon equations of motion -------------------------------------------------------------
+        # --- photon equations of motion, MB95 eqs. (63) ---------------------------------------------
+        idxg  = 7
+        idxgp = 7 + (lmaxg+1)
         # ... photon density, BLT11 eq. (2.4a)
         deltagprime = 4.0 / 3.0 * (-thetag - 0.5 * hprime)
-        f = f.at[7].set( deltagprime )
+        f = f.at[idxg+0].set( deltagprime )
         # ... photon velocity, BLT11 eq. (2.4b)
         thetagprime = kmode**2 * (0.25 * deltag - s2_squared * shearg) \
                     + opac * (thetab - thetag)
-        f = f.at[8].set( thetagprime )
+        f = f.at[idxg+1].set( thetagprime )
         # ... photon shear, BLT11 eq. (2.4c)
-        sheargprime = 8./15. * (thetag+kmode**2*alpha) -3/5*kmode*s_l3/s_l2*y[10] \
-                    - opac*(y[9]-0.1*s_l2*polter)
-        f = f.at[9].set( sheargprime )
+        sheargprime = 8./15. * (thetag+kmode**2*alpha) -3/5*kmode*s_l3/s_l2*y[idxg+3] \
+                    - opac*(y[idxg+2]-0.1*s_l2*polter)
+        f = f.at[idxg+2].set( sheargprime )
 
         # photon temperature l>=3, BLT11 eq. (2.4d)
         ell  = jnp.arange(2, lmaxg - 1)
-        f = f.at[8+ell].set( kmode  / (2 * ell + 2) * ((ell + 1) * y[7 + ell] - (ell + 2) * y[9 + ell]) - opac * y[8 + ell] )
+        f = f.at[idxg+ell+1].set( kmode  / (2 * ell + 2) * ((ell + 1) * y[idxg+ell] - (ell + 2) * y[idxg+ell+2]) - opac * y[idxg+ell+1] )
         # photon temperature hierarchy truncation, BLT11 eq. (2.5)
-        f = f.at[7 + lmaxg].set( kmode * y[6 + lmaxg] - (lmaxg + 1) / tau * y[7 + lmaxg] - opac * y[7 + lmaxg] )
+        f = f.at[idxg+lmaxg].set( kmode * y[idxg+lmaxg-1] - (lmaxg + 1) / tau * y[idxg+lmaxg] - opac * y[idxg+lmaxg] )
     
         # polarization equations, BLT11 eq. (2.4e)
         # photon polarization l=0
-        f = f.at[8 + lmaxg].set( -kmode * y[9 + lmaxg] - opac * y[8 + lmaxg] + 0.5 * opac * polter )
+        f = f.at[idxgp+0].set( -kmode * y[idxgp+1] - opac * y[idxgp] + 0.5 * opac * polter )
         # photon polarization l=1
-        f = f.at[9 + lmaxg].set( kmode / 3.0 * (y[8 + lmaxg] - 2.0 * y[10 + lmaxg]) - opac * y[9 + lmaxg] )
+        f = f.at[idxgp+1].set( kmode / 3.0 * (y[idxgp] - 2.0 * y[idxgp+2]) - opac * y[idxgp+1] )
         # photon polarization l=2
-        f = f.at[10 + lmaxg].set( kmode * (0.4 * y[9 + lmaxg] - 0.6 * y[11 + lmaxg]) - opac * (y[10 + lmaxg] - 0.1 * s_l2 * polter))
+        f = f.at[idxgp+2].set( kmode * (0.4 * y[idxgp+1] - 0.6 * y[idxgp+3]) - opac * (y[idxgp+2] - 0.1 * s_l2 * polter))
         # photon polarization lmax>l>=3
         ell  = jnp.arange(2, lmaxgp - 1)
-        f = f.at[9+lmaxg+ell].set( kmode  / (2 * ell + 2) * ((ell + 1) * y[8 + lmaxg + ell] - (ell + 2) * y[10 + lmaxg + ell]) - opac * y[9 + lmaxg + ell] )
+        f = f.at[idxgp+ell+1].set( kmode  / (2 * ell + 2) * ((ell + 1) * y[idxgp+ell] - (ell + 2) * y[idxgp+ell+2]) - opac * y[idxgp+ell+1] )
         # photon polarization hierarchy truncation
-        f = f.at[8 + lmaxg + lmaxgp].set( kmode * y[7 + lmaxg + lmaxgp] - (lmaxgp + 1) / tau * y[8 + lmaxg + lmaxgp] - opac * y[8 + lmaxg + lmaxgp] )
+        f = f.at[idxgp+lmaxgp].set( kmode * y[idxgp+lmaxgp-1] - (lmaxgp + 1) / tau * y[idxgp+lmaxgp] - opac * y[idxgp+lmaxgp] )
         
         return f
     
@@ -238,34 +241,38 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
         tca_shearg = (1.-11./6*taucprime) * shearg - 11./6 * tauc * 16/45 * tauc * (thetaprime + kmode**2 * alphaprime)
         
         # --- baryon equations of motion -------------------------------------------------------------
+        idxb = 5
         # ... baryon density
         deltabprime = -thetab - 0.5 * hprime
-        f = f.at[5].set( deltabprime )
+        f = f.at[idxb+0].set( deltabprime )
         # ... baryon velocity
         thetabprime = (-aprimeoa * thetab + kmode**2 * (cs2 * deltab + pb43 * (0.25 * deltag - s2_squared * tca_shearg)) + pb43 * tca_slip) / (1.0 + pb43)
-        f = f.at[6].set( thetabprime )
+        f = f.at[idxb+1].set( thetabprime )
 
         # --- photon equations of motion -------------------------------------------------------------
+        idxg  = 7
         # ... photon density
         deltagprime = 4.0 / 3.0 * (-thetag - 0.5 * hprime)
-        f = f.at[7].set( deltagprime )
+        f = f.at[idxg+0].set( deltagprime )
         # ... photon velocity
         thetagprime = -(thetab + aprimeoa * thetab - kmode**2 * cs2 * deltab) / pb43  + kmode**2 * (0.25 * deltag -s2_squared * tca_shearg)
-        f = f.at[8].set( thetagprime )
+        f = f.at[idxg+1].set( thetagprime )
 
         return f
     
     # --- check if we are in the tight coupling regime -----------------------------------------------
-    tight_coupling_trigger_tau_c_over_tau_h=0.005 # value taken from CLASS
-    tight_coupling_trigger_tau_c_over_tau_k=0.008 # value taken from CLASS
+    tight_coupling_trigger_tau_c_over_tau_h=0.015 # value taken from CLASS
+    tight_coupling_trigger_tau_c_over_tau_k=0.010 # value taken from CLASS
 
-    tauh = 1./(aprimeoa)
+    tauh = 1./aprimeoa  # TBC: or 1./(aprimeoa*a)?
     tauk = 1./kmode
-    # tca_condition = jnp.logical_and(jnp.logical_and(tauc/tauh < tight_coupling_trigger_tau_c_over_tau_h, tauc/tauk < tight_coupling_trigger_tau_c_over_tau_k),opac>1e-4)
-    tca_condition = jnp.logical_and(tauc/tauh < tight_coupling_trigger_tau_c_over_tau_h, tauc/tauk < tight_coupling_trigger_tau_c_over_tau_k)
-
-    f = jax.lax.cond(tca_condition, calc_baryon_photon_tca, calc_baryon_photon_uncoupled, f )
-
+    
+    f = jax.lax.cond(
+        jnp.logical_or( tauc/tauk > tight_coupling_trigger_tau_c_over_tau_k,
+            jnp.logical_and( tauc/tauh > tight_coupling_trigger_tau_c_over_tau_h,
+                            tauc/tauk > 0.1*tight_coupling_trigger_tau_c_over_tau_k)),
+        calc_baryon_photon_uncoupled, calc_baryon_photon_tca, f )
+    
     # --- Massless neutrino equations of motion -------------------------------------------------------
     idxr = 9 + lmaxg + lmaxgp
     deltarprime = 4.0 / 3.0 * (-thetar - 0.5 * hprime)
@@ -274,10 +281,10 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
     f = f.at[idxr+1].set( thetarprime )
     f = f.at[idxr+2].set( 8.0 / 15.0 * thetar - 0.6 * kmode * y[idxr+3] + 4.0 / 15.0 * hprime + 8.0 / 5.0 * etaprime )
     ell = jnp.arange(2, lmaxr - 1)
-    f = f.at[idxr + 1 + ell].set( kmode / (2 * ell + 2) * ((ell + 1) * y[idxr + ell] - (ell + 2) * y[idxr + 2 + ell]) )
+    f = f.at[idxr+ell+1].set( kmode / (2 * ell + 2) * ((ell + 1) * y[idxr+ell] - (ell + 2) * y[idxr+ell+2]) )
     
     # ... truncate moment expansion
-    f = f.at[idxr + lmaxr].set( kmode * y[idxr + lmaxr-1] - (lmaxr + 1) / tau * y[idxr + lmaxr] )
+    f = f.at[idxr + lmaxr].set( kmode * y[idxr+lmaxr-1] - (lmaxr + 1) / tau * y[idxr+lmaxr] )
 
     # --- Massive neutrino equations of motion --------------------------------------------------------
     q = jnp.arange(1, nqmax + 1) - 0.5  # so dq == 1
@@ -313,7 +320,7 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
 # @partial(jax.jit, static_argnames=('num_k', 'nvar', 'lmax', 'nqmax'))
 def adiabatic_ics( *, tau: float, param, kmodes, num_k, nvar, lmaxg, lmaxgp, lmaxr, lmaxnu, nqmax):
     """Initial conditions for adiabatic perturbations"""
-    iq0 = 11 + lmaxg + lmaxgp + lmaxr
+    iq0 = 10 + lmaxg + lmaxgp + lmaxr
     iq1 = iq0 + nqmax
     iq2 = iq1 + nqmax
     iq3 = iq2 + nqmax
