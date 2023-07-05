@@ -109,7 +109,7 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
     ) / a**2 - param['grhom'] * param['OmegaL'] * a**2
 
     aprimeoa = jnp.sqrt(grho / 3.0)
-    aprimeprimeoa = 0.5 * (aprimeoa * aprimeoa - gpres)
+    aprimeprimeoa = 0.5 * (aprimeoa**2 - gpres)
 
     # ... Thomson opacity coefficient
     akthom = 2.3048e-9 * (1.0 - param['YHe']) * param['Omegab'] * param['H0']**2
@@ -219,7 +219,7 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
         
         return f
     
-    def calc_baryon_photon_tca( f ):
+    def calc_baryon_photon_tca_CLASS( f ):
         # === treat baryons and photons as tighly coupled (TCA) =====================================
         # first order slip
         thetaprime  = (-aprimeoa*thetab+kmode**2*(cs2*deltab+pb43/4*deltag))/(1+pb43)
@@ -244,7 +244,7 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
         # ... baryon density
         deltabprime = -thetab - 0.5 * hprime
         f = f.at[idxb+0].set( deltabprime )
-        # ... baryon velocity
+        # ... baryon velocity, BLT 11, eq. (2.7a)
         thetabprime = (-aprimeoa * thetab + kmode**2 * (cs2 * deltab + pb43 * (0.25 * deltag - s2_squared * tca_shearg)) + pb43 * tca_slip) / (1.0 + pb43)
         f = f.at[idxb+1].set( thetabprime )
 
@@ -253,10 +253,31 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
         # ... photon density
         deltagprime = 4.0 / 3.0 * (-thetag - 0.5 * hprime)
         f = f.at[idxg+0].set( deltagprime )
-        # ... photon velocity
+        # ... photon velocity, BLT11, eq. (2.7b)
         thetagprime = -(thetabprime + aprimeoa * thetab - kmode**2 * cs2 * deltab) / pb43  + kmode**2 * (0.25 * deltag -s2_squared * tca_shearg)
         f = f.at[idxg+1].set( thetagprime )
 
+        return f
+    
+    def calc_baryon_photon_tca_MB( f ):
+        idxb = 5
+        idxg = 7
+
+        deltabprime = -thetab - 0.5 * hprime
+        f = f.at[idxb+0].set( deltabprime )
+
+        thetabprime = (-aprimeoa * thetab + kmode**2 * cs2 * deltab + kmode**2 * pb43 * (0.25 * deltag - s2_squared * shearg)) / (1.0 + pb43)
+        
+        deltagprime = 4.0 / 3.0 * (-thetag - 0.5 * hprime)
+        f = f.at[idxg+0].set( deltagprime )
+
+        aprimeprimeoa = 0.5*(aprimeoa**2-gpres)
+        slip = 2*pb43/(1+pb43)*aprimeoa*(thetab-thetag) + 1/opac *(-aprimeprimeoa*thetab-aprimeoa*kmode**2/2*deltag + kmode**2*(cs2*deltabprime-0.25*deltagprime))/(1+pb43)
+        thetabprime += pb43/(1+pb43)*slip
+        f = f.at[idxb+1].set( thetabprime )
+
+        thetagprime = (-thetabprime-aprimeoa*thetab+kmode**2*cs2*deltab)/pb43 + kmode**2 *(0.25*deltag-s2_squared*shearg)
+        f = f.at[idxg+1].set( thetagprime )
         return f
     
     # --- check if we are in the tight coupling regime -----------------------------------------------
@@ -270,7 +291,7 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
         jnp.logical_or( tauc/tauk > tight_coupling_trigger_tau_c_over_tau_k,
             jnp.logical_and( tauc/tauh > tight_coupling_trigger_tau_c_over_tau_h,
                             tauc/tauk > 0.1*tight_coupling_trigger_tau_c_over_tau_k)),
-        calc_baryon_photon_uncoupled, calc_baryon_photon_tca, f )
+        calc_baryon_photon_uncoupled, calc_baryon_photon_tca_CLASS, f )
     
     # f = calc_baryon_photon_tca( f )
     
@@ -281,7 +302,8 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
     f = f.at[idxr+0].set( deltarprime )
     thetarprime = kmode**2 * (0.25 * deltar - shearr)
     f = f.at[idxr+1].set( thetarprime )
-    f = f.at[idxr+2].set( 8./15. * (thetar + kmode**2 * alpha) - 0.6 * kmode * y[idxr+3] )
+    shearrprime = 8./15. * (thetar + kmode**2 * alpha) - 0.6 * kmode * y[idxr+3]
+    f = f.at[idxr+2].set( shearrprime )
     ell = jnp.arange(3, lmaxr)
     f = f.at[idxr+ell].set( kmode / (2 * ell + 1) * (ell * y[idxr+ell-1] - (ell + 1) * y[idxr+ell+1]) )
     
