@@ -119,7 +119,7 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
     # tau = 1/ photon_scattering_rate;
     opac    = xe * akthom / a**2
     tauc    = 1. / opac
-    taucprime = tau * (2*aprimeoa - xeprime/xe)
+    taucprime = tauc * (2*aprimeoa - xeprime/xe)
     F       = tauc / (1+pb43) #CLASS perturbations.c:10072
     Fprime    = taucprime/(1+pb43) + tauc*pb43*aprimeoa/(1+pb43)**2 #CLASS perturbations.c:10074
 
@@ -191,7 +191,7 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
         f = f.at[idxg+0].set( deltagprime )
         # ... photon velocity, BLT11 eq. (2.4b)
         thetagprime = kmode**2 * (0.25 * deltag - s2_squared * shearg) \
-                    + opac * (thetab - thetag)
+                    - opac * (thetag - thetab)
         f = f.at[idxg+1].set( thetagprime )
         # ... photon shear, BLT11 eq. (2.4c)
         sheargprime = 8./15. * (thetag+kmode**2*alpha) -3/5*kmode*s_l3/s_l2*y[idxg+3] \
@@ -451,8 +451,8 @@ def evolve_one_mode( *, y0, tau_start, tau_max, tau_out, param, kmode, lmaxg, lm
 
 # @partial(jax.jit, static_argnames=("num_k","lmaxg","lmaxgp", "lmaxr", "lmaxnu","nqmax","rtol","atol"))
 def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k : int, \
-                         lmaxg : int = 4, lmaxgp : int = 4, lmaxr : int = 4, lmaxnu : int = 4, \
-                         nqmax : int = 15, rtol: float = 1e-5, atol: float = 1e-4 ):
+                         lmaxg : int = 12, lmaxgp : int = 12, lmaxr : int = 17, lmaxnu : int = 17, \
+                         nqmax : int = 15, rtol: float = 1e-3, atol: float = 1e-4 ):
     """evolve cosmological perturbations in the synchronous gauge
 
     Parameters
