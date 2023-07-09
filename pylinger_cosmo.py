@@ -39,21 +39,25 @@ def ninu1( a : float, amnu: float, nq : int = 1000, qmax : float = 30.) -> tuple
     qdn  = dq * q**3 / (jnp.exp(q) + 1)
     dum1 = qdn / v
     dum2 = qdn * v
+    dum3 = qdn * v**3
     
     rho_spline = jaxinterp.InterpolatedUnivariateSpline(q, dum1)
     rhonu = rho_spline.integral(0, qmax)
     p_spline = jaxinterp.InterpolatedUnivariateSpline(q, dum2)
     pnu = p_spline.integral(0, qmax)
+    ppseudo_spline = jaxinterp.InterpolatedUnivariateSpline(q, dum3)
+    pseudonu = ppseudo_spline.integral(0, qmax)
 
     # Apply asymptotic corrrection for q>qmax and normalize by relativistic
     # energy density.
     rhonu = (rhonu / dq + dum1[-1] / dq) / const
     pnu = (pnu / dq + dum2[-1] / dq) / const / 3
+    ppseudo = (pseudonu / dq + dum3[-1] / dq) / const / 3
     
-    return rhonu[0], pnu[0]
+    return rhonu[0], pnu[0], ppseudo[0]
 
 
-def ninu1_numoy( a : float, amnu: float, nq : int = 1000, qmax : float = 30.) -> tuple[float, float]:
+def ninu1_numpy( a : float, amnu: float, nq : int = 1000, qmax : float = 30.) -> tuple[float, float]:
     """ computes the neutrino density and pressure of one flavour of massive neutrinos
         in units of the mean density of one flavour of massless neutrinos
 
@@ -91,6 +95,36 @@ def ninu1_numoy( a : float, amnu: float, nq : int = 1000, qmax : float = 30.) ->
     pnu = (pnu / dq + dum2[-1] / dq) / const / 3
     
     return rhonu[0], pnu[0]
+
+@jax.jit
+def nu_perturb_jax_old( a : float, amnu: float, psi0, psi1, psi2, nq : int = 1000, qmax : float = 30.):
+    """ Compute the perturbations of density, energy flux, pressure, and
+        shear stress of one flavor of massive neutrinos, in units of the mean
+        density of one flavor of massless neutrinos, by integrating over 
+        momentum.
+
+    Args:
+        a (float): scale factor
+        amnu (float): neutrino mass in units of neutrino temperature (m_nu*c**2/(k_B*T_nu0).
+        psi0 (_type_): 
+        psi1 (_type_): _description_
+        psi2 (_type_): _description_
+        nq (int, optional): _description_. Defaults to 1000.
+        qmax (float, optional): _description_. Defaults to 30..
+
+    Returns:
+        _type_: drhonu, dpnu, fnu, shearnu
+    """
+    nqmax = len(psi0)
+    # const = 7 * np.pi**4 / 120
+    const = 5.682196976983475
+    
+    # if nqmax == 3:
+    nu_q = jnp.array([0.913201, 3.37517, 7.79184])
+    nu_int_kernel = jnp.array([0.0687359, 3.31435, 2.29911])
+        
+    # else:
+        
 
 
 @jax.jit
@@ -263,10 +297,11 @@ class cosmo:
         a = jnp.geomspace(amin, amax, num_thermo)
 
         # Compute the neutrino density and pressure
-        rhonu_, pnu_ = jax.vmap( lambda a_ : ninu1( a_, amnu ), in_axes=0 )( a )
+        rhonu_, pnu_, ppseudonu_ = jax.vmap( lambda a_ : ninu1( a_, amnu ), in_axes=0 )( a )
         rhonu_spline =  jaxinterp.InterpolatedUnivariateSpline(a, rhonu_)
         self.param['rhonu_of_a_spline'] = rhonu_spline
         self.param['pnu_of_a_spline']   = jaxinterp.InterpolatedUnivariateSpline(a, pnu_)
+        self.param['ppseudonu_of_a_spline'] = jaxinterp.InterpolatedUnivariateSpline(a, ppseudonu_)
 
         taumin = amin / adotrad
         taumax = taumin + romb( lambda a: dtauda_(a,grhom, grhog, grhor, Omegam, OmegaL, Omegak, Neff, Nmnu, rhonu_spline), amin, amax )
