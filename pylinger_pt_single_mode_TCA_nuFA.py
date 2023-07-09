@@ -427,8 +427,7 @@ def model_synchronous_neutrino_cfa(*, tau, yin, param, kmode, lmaxg, lmaxgp, lma
     # ... massive neutrinos
     deltanu = y[iq0+0]
     thetanu = y[iq0+1]
-    shearnu = y[iq0+2] / 2.0
-    dpnu    = 0.0
+    shearnu = y[iq0+2]
 
     # ... evaluate thermodynamics
     tempb = param['tempb_of_tau_spline']( tau )
@@ -444,6 +443,8 @@ def model_synchronous_neutrino_cfa(*, tau, yin, param, kmode, lmaxg, lmaxgp, lma
     rhonu = param['rhonu_of_a_spline']( a )
     pnu = param['pnu_of_a_spline']( a ) 
     ppseudonu = param['ppseudonu_of_a_spline']( a )
+    wnu = pnu / rhonu
+    dpnu = wnu * rhonu * deltanu  # this is actually pnu * deltanu
     
     grho = (
         param['grhom'] * param['Omegam'] / a
@@ -478,7 +479,7 @@ def model_synchronous_neutrino_cfa(*, tau, yin, param, kmode, lmaxg, lmaxgp, lma
     
     dgrho = (
         param['grhom'] * (param['Omegac'] * deltac + param['Omegab'] * deltab) / a
-        + (param['grhog'] * deltag + param['grhor'] * (param['Neff'] * deltar + param['Nmnu'] * deltanu)) / a**2
+        + (param['grhog'] * deltag + param['grhor'] * (param['Neff'] * deltar + param['Nmnu'] * rhonu * deltanu)) / a**2
     )
     dgpres = (
         param['grhog'] * deltag + param['grhor'] * param['Neff'] * deltar
@@ -663,11 +664,14 @@ def model_synchronous_neutrino_cfa(*, tau, yin, param, kmode, lmaxg, lmaxgp, lma
     ceff2_ncdm = ca2_ncdm
     cvis2_ncdm = 3.*w_ncdm*ca2_ncdm # CLASS's fluid approximation eq. (3.15c) in LT11, 
     
-    f = f.at[iq0+0].set( -(1+w_ncdm)*(thetanu + 0.5*hprime) - 3 * aprimeoa * (ceff2_ncdm-w_ncdm) * deltanu )
-    f = f.at[iq0+1].set( -aprimeoa * (1-3*ca2_ncdm) * thetanu + kmode**2 * ceff2_ncdm/(1+w_ncdm) * deltanu 
-        - kmode**2 * shearnu )
-        
-    f = f.at[iq0+2].set( -3*(aprimeoa*(2/3-ca2_ncdm-ppseudonu/pnu/3) + 1/tau) * shearnu 
+    # LT11, eq. (3.1a)
+    deltamnuprime = (1+w_ncdm)*(-thetanu - 0.5 * hprime) - 3 * aprimeoa * (ceff2_ncdm-w_ncdm) * deltanu
+    f = f.at[iq0+0].set( deltamnuprime )
+    # LT11, eq. (3.1b)
+    thetamnuprime = -aprimeoa * (1-3*ca2_ncdm) * thetanu + kmode**2 * (ceff2_ncdm/(1+w_ncdm) * deltanu - shearnu)
+    f = f.at[iq0+1].set( thetamnuprime )
+    # LT11, eq. (3.15c)
+    f = f.at[iq0+2].set( -3*(1/tau + aprimeoa*(2/3-ca2_ncdm-ppseudonu/pnu/3)) * shearnu 
         +8/3*cvis2_ncdm/(1+w_ncdm)*s_l2*(thetanu+0.5*hprime) )
 
     return f.flatten()
@@ -687,12 +691,15 @@ def neutrino_convert_to_fluid(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, l
     y = jnp.zeros((nvarnu))
     
     drhonu, dpnu, fnu, shearnu = nu_perturb_jax( a, param['amnu'], yin[iq0:iq1], yin[iq1:iq2], yin[iq2:iq3] )
+    rhonu = param['rhonu_of_a_spline']( a )
+    pnu = param['pnu_of_a_spline']( a ) 
+    rho_plus_p = rhonu + pnu
     
     y = y.at[:iq0].set( yin[:iq0] )
     
-    y = y.at[iq0+0].set( drhonu )
-    y = y.at[iq0+1].set( kmode*fnu )
-    y = y.at[iq1+2].set( shearnu )
+    y = y.at[iq0+0].set( drhonu / rhonu )
+    y = y.at[iq0+1].set( kmode*fnu / rho_plus_p )
+    y = y.at[iq1+2].set( shearnu / rho_plus_p )
     
     return y
 
