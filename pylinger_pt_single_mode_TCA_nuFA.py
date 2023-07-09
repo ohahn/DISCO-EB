@@ -673,26 +673,26 @@ def model_synchronous_neutrino_cfa(*, tau, yin, param, kmode, lmaxg, lmaxgp, lma
     return f.flatten()
 
 
-@partial(jax.jit, static_argnames=('lmaxg', 'lmaxgp', 'lmaxr', 'lmaxnu', 'nqmax', 'massive_neutrino_fa'))
-def neutrino_convert_to_fluid(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, nqmax, massive_neutrino_fa):
+@partial(jax.jit, static_argnames=('lmaxg', 'lmaxgp', 'lmaxr', 'lmaxnu', 'nqmax'))
+def neutrino_convert_to_fluid(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, nqmax ):
     iq0 = 10 + lmaxg + lmaxgp + lmaxr
     iq1 = iq0 + nqmax
     iq2 = iq1 + nqmax
     iq3 = iq2 + nqmax
     iq4 = iq3 + nqmax
     
-    a = y[0]
+    a = yin[0]
     
     nvarnu = 10 + lmaxg + lmaxgp + lmaxr + 3
     y = jnp.zeros((nvarnu))
     
     drhonu, dpnu, fnu, shearnu = nu_perturb_jax( a, param['amnu'], yin[iq0:iq1], yin[iq1:iq2], yin[iq2:iq3] )
     
-    y[:iq0]  = yin[:iq0]
+    y = y.at[:iq0].set( yin[:iq0] )
     
-    y[iq0+0] = drhonu
-    y[iq0+1] = kmode*fnu
-    y[iq1+2] = shearnu
+    y = y.at[iq0+0].set( drhonu )
+    y = y.at[iq0+1].set( kmode*fnu )
+    y = y.at[iq1+2].set( shearnu )
     
     return y
 
@@ -811,13 +811,13 @@ def evolve_one_mode( *, y0, tau_start, tau_max, tau_out, param, kmode, lmaxg, lm
     
     model2 = diffrax.ODETerm( 
         lambda tau, y , params : 
-            model_synchronous( tau=tau, yin=y, param=param, kmode=kmode, lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax ) 
-            # model_synchronous_neutrino_cfa( tau=tau, yin=y, param=param, kmode=kmode, lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax ) 
+            # model_synchronous( tau=tau, yin=y, param=param, kmode=kmode, lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax ) 
+            model_synchronous_neutrino_cfa( tau=tau, yin=y, param=param, kmode=kmode, lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax ) 
     )
     
     ncdm_fluid_trigger_tau_over_tau_k = 31
     tauk = 1./kmode
-    tau_neutrino_cfa = jnp.maximum(tauk * ncdm_fluid_trigger_tau_over_tau_k, tau_max)
+    tau_neutrino_cfa = jnp.minimum(tauk * ncdm_fluid_trigger_tau_over_tau_k, tau_max)
     
     saveat = diffrax.SaveAt(ts=tau_out)
     
@@ -838,10 +838,8 @@ def evolve_one_mode( *, y0, tau_start, tau_max, tau_out, param, kmode, lmaxg, lm
         max_steps=10001,
     )
     
-    return sol1.ys
-    
-    # y0_neutrino_cfa = neutrino_convert_to_fluid( sol1.ys[-1], param=param, kmode=kmode, lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax )
-    y0_neutrino_cfa = jnp.copy( sol1.ys[-1,:] )
+    y0_neutrino_cfa = neutrino_convert_to_fluid( tau=sol1.ts[-1], yin=sol1.ys[-1,:], param=param, kmode=kmode, lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax )
+    # y0_neutrino_cfa = jnp.copy( sol1.ys[-1,:] )
     
     sol2 = diffrax.diffeqsolve(
         terms=model2,
