@@ -376,10 +376,6 @@ def model_synchronous_neutrino_cfa(*, tau, yin, param, kmode, lmaxg, lmaxgp, lma
     """
 
     iq0 = 10 + lmaxg + lmaxgp + lmaxr
-    iq1 = iq0 + nqmax
-    iq2 = iq1 + nqmax
-    iq3 = iq2 + nqmax
-    iq4 = iq3 + nqmax
 
     y = jnp.copy(yin)
     f = jnp.zeros_like(y)
@@ -438,17 +434,18 @@ def model_synchronous_neutrino_cfa(*, tau, yin, param, kmode, lmaxg, lmaxgp, lma
     photbar = param['grhog'] / (param['grhom'] * param['Omegab'] * a)
     pb43 = 4.0 / 3.0 * photbar
 
-    # ... compute expansion rate
+    # ... massive neutrino thermodynamics
     rhonu = param['rhonu_of_a_spline']( a )
     pnu = param['pnu_of_a_spline']( a ) 
-    ppseudonu = param['ppseudonu_of_a_spline']( a )
-    #dpnu = wnu * rhonu * deltanu  # this is actually pnu * deltanu
+    ppseudonu = param['ppseudonu_of_a_spline']( a ) # pseudo pressure from CLASS IV, LT11
+    
     w_nu = pnu / rhonu
     ca2_nu = w_nu/3.0/(1.0+w_nu)*(5.0-ppseudonu/pnu)  # eq. (3.3) in LT11
     ceff2_nu = ca2_nu
     cvis2_nu = 3.*w_nu*ca2_nu # CLASS's fluid approximation eq. (3.15c) in LT11
     dpnu = ca2_nu * rhonu * deltanu
     
+    # ... compute expansion rate
     grho = (
         param['grhom'] * param['Omegam'] / a
         + (param['grhog'] + param['grhor'] * (param['Neff'] + param['Nmnu'] * rhonu)) / a**2
@@ -460,8 +457,8 @@ def model_synchronous_neutrino_cfa(*, tau, yin, param, kmode, lmaxg, lmaxgp, lma
         (param['grhog'] + param['grhor'] * param['Neff']) / 3.0 + param['grhor'] * param['Nmnu'] * pnu
     ) / a**2 - param['grhom'] * param['OmegaL'] * a**2
 
-    aprimeoa = jnp.sqrt(grho / 3.0)
-    aprimeprimeoa = 0.5 * (aprimeoa**2 - gpres)
+    aprimeoa = jnp.sqrt(grho / 3.0)                 # Friedmann I
+    aprimeprimeoa = 0.5 * (aprimeoa**2 - gpres)     # Friedmann II
 
     # ... Thomson opacity coefficient
     akthom = 2.3048e-9 * (1.0 - param['YHe']) * param['Omegab'] * param['H0']**2
@@ -683,7 +680,6 @@ def neutrino_convert_to_fluid(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, l
     iq1 = iq0 + nqmax
     iq2 = iq1 + nqmax
     iq3 = iq2 + nqmax
-    iq4 = iq3 + nqmax
     
     a = yin[0]
     
@@ -701,8 +697,8 @@ def neutrino_convert_to_fluid(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, l
     # y = y.at[iq0+1].set( kmode*fnu / rho_plus_p )
     # y = y.at[iq0+2].set( shearnu / rho_plus_p )
     y = y.at[iq0+0].set( drhonu )
-    y = y.at[iq0+1].set( kmode*fnu )
-    y = y.at[iq0+2].set( shearnu )
+    y = y.at[iq0+1].set( kmode * fnu * rhonu / rho_plus_p )
+    y = y.at[iq0+2].set( shearnu * rhonu / rho_plus_p )
     
     return y
 
