@@ -97,7 +97,6 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
     # ... compute expansion rate
     rhonu = param['rhonu_of_a_spline']( a )
     pnu = param['pnu_of_a_spline']( a ) 
-    ppseudonu = param['ppseudonu_of_a_spline']( a )
     
     grho = (
         param['grhom'] * param['Omegam'] / a
@@ -443,8 +442,12 @@ def model_synchronous_neutrino_cfa(*, tau, yin, param, kmode, lmaxg, lmaxgp, lma
     rhonu = param['rhonu_of_a_spline']( a )
     pnu = param['pnu_of_a_spline']( a ) 
     ppseudonu = param['ppseudonu_of_a_spline']( a )
-    wnu = pnu / rhonu
-    dpnu = wnu * rhonu * deltanu  # this is actually pnu * deltanu
+    #dpnu = wnu * rhonu * deltanu  # this is actually pnu * deltanu
+    w_nu = pnu / rhonu
+    ca2_nu = w_nu/3.0/(1.0+w_nu)*(5.0-ppseudonu/pnu)  # eq. (3.3) in LT11
+    ceff2_nu = ca2_nu
+    cvis2_nu = 3.*w_nu*ca2_nu # CLASS's fluid approximation eq. (3.15c) in LT11
+    dpnu = ca2_nu * rhonu * deltanu
     
     grho = (
         param['grhom'] * param['Omegam'] / a
@@ -623,7 +626,7 @@ def model_synchronous_neutrino_cfa(*, tau, yin, param, kmode, lmaxg, lmaxgp, lma
         thetabprime += pb43/(1+pb43)*slip
         f = f.at[idxb+1].set( thetabprime )
 
-        thetagprime = (-thetabprime-aprimeoa*thetab+kmode**2*cs2*deltab)/pb43 + kmode**2 *(0.25*deltag-s2_squared*shearg)
+        thetagprime = (-thetabprime-aprimeoa*thetab+kmode**2*cs2*deltab)/pb43 + kmode**2 * (0.25*deltag - s2_squared*shearg)
         f = f.at[idxg+1].set( thetagprime )
         return f
     
@@ -659,20 +662,17 @@ def model_synchronous_neutrino_cfa(*, tau, yin, param, kmode, lmaxg, lmaxgp, lma
 
     # --- Massive neutrino equations of motion --------------------------------------------------------
     # LT11: CLASS IV: ncdm, Lesgourgues & Tram 2011, https://arxiv.org/abs/1104.2935
-    w_ncdm = pnu / rhonu
-    ca2_ncdm = w_ncdm/3.0/(1.0+w_ncdm)*(5.0-ppseudonu/pnu)  # eq. (3.3) in LT11
-    ceff2_ncdm = ca2_ncdm
-    cvis2_ncdm = 3.*w_ncdm*ca2_ncdm # CLASS's fluid approximation eq. (3.15c) in LT11, 
     
     # LT11, eq. (3.1a)
-    deltamnuprime = (1+w_ncdm)*(-thetanu - 0.5 * hprime) - 3 * aprimeoa * (ceff2_ncdm-w_ncdm) * deltanu
-    f = f.at[iq0+0].set( deltamnuprime )
+    deltanuprime = (1+w_nu)*(-thetanu - 0.5 * hprime) - 3 * aprimeoa * (ceff2_nu-w_nu) * deltanu
+    f = f.at[iq0+0].set( deltanuprime )
     # LT11, eq. (3.1b)
-    thetamnuprime = -aprimeoa * (1-3*ca2_ncdm) * thetanu + kmode**2 * (ceff2_ncdm/(1+w_ncdm) * deltanu - shearnu)
+    thetamnuprime = -aprimeoa * (1-3*ca2_nu) * thetanu + kmode**2 * (ceff2_nu/(1+w_nu) * deltanu - shearnu)
     f = f.at[iq0+1].set( thetamnuprime )
     # LT11, eq. (3.15c)
-    f = f.at[iq0+2].set( -3*(1/tau + aprimeoa*(2/3-ca2_ncdm-ppseudonu/pnu/3)) * shearnu 
-        +8/3*cvis2_ncdm/(1+w_ncdm)*s_l2*(thetanu+0.5*hprime) )
+    sigmanuprime = -3*(1/tau + aprimeoa*(2/3 - ca2_nu - ppseudonu/pnu/3)) * shearnu \
+        + 8/3 * cvis2_nu/(1+w_nu) * s_l2 * (thetanu + 0.5*hprime)
+    f = f.at[iq0+2].set( sigmanuprime )
 
     return f.flatten()
 
@@ -697,9 +697,12 @@ def neutrino_convert_to_fluid(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, l
     
     y = y.at[:iq0].set( yin[:iq0] )
     
-    y = y.at[iq0+0].set( drhonu / rhonu )
-    y = y.at[iq0+1].set( kmode*fnu / rho_plus_p )
-    y = y.at[iq1+2].set( shearnu / rho_plus_p )
+    # y = y.at[iq0+0].set( drhonu / rhonu )
+    # y = y.at[iq0+1].set( kmode*fnu / rho_plus_p )
+    # y = y.at[iq0+2].set( shearnu / rho_plus_p )
+    y = y.at[iq0+0].set( drhonu )
+    y = y.at[iq0+1].set( kmode*fnu )
+    y = y.at[iq0+2].set( shearnu )
     
     return y
 
@@ -822,9 +825,9 @@ def evolve_one_mode( *, y0, tau_start, tau_max, tau_out, param, kmode, lmaxg, lm
             model_synchronous_neutrino_cfa( tau=tau, yin=y, param=param, kmode=kmode, lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax ) 
     )
     
-    ncdm_fluid_trigger_tau_over_tau_k = 31
+    nu_fluid_trigger_tau_over_tau_k = 31
     tauk = 1./kmode
-    tau_neutrino_cfa = jnp.minimum(tauk * ncdm_fluid_trigger_tau_over_tau_k, tau_max)
+    tau_neutrino_cfa = jnp.minimum(tauk * nu_fluid_trigger_tau_over_tau_k, tau_max)
     
     saveat = diffrax.SaveAt(ts=tau_out)
     
@@ -851,7 +854,7 @@ def evolve_one_mode( *, y0, tau_start, tau_max, tau_out, param, kmode, lmaxg, lm
     sol2 = diffrax.diffeqsolve(
         terms=model2,
         solver=solver,
-        t0=tau_neutrino_cfa,
+        t0=sol1.ts[-1],
         t1=tau_max,
         dt0=tau_neutrino_cfa/2,
         y0=y0_neutrino_cfa,
