@@ -1,7 +1,7 @@
 import jax
 import jax.numpy as jnp
 import jax_cosmo.scipy.interpolate as jaxinterp
-from pylinger_cosmo import cosmo, nu_perturb_jax
+from pylinger_cosmo import cosmo, nu_perturb
 from functools import partial
 import diffrax
 
@@ -129,7 +129,7 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
     f = f.at[0].set( aprimeoa * a )
     
     # ... evaluate metric perturbations
-    drhonu, dpnu, fnu, shearnu = nu_perturb_jax( a, param['amnu'], y[iq0:iq1], y[iq1:iq2], y[iq2:iq3] )
+    drhonu, dpnu, fnu, shearnu = nu_perturb( a, param['amnu'], y[iq0:iq1], y[iq1:iq2], y[iq2:iq3] )
 
     dgrho = (
         param['grhom'] * (param['Omegac'] * deltac + param['Omegab'] * deltab) / a
@@ -431,19 +431,21 @@ def model_synchronous_neutrino_cfa(*, tau, yin, param, kmode, lmaxg, lmaxgp, lma
     xeprime = param['xe_of_tau_spline'].derivative( tau )
 
     # ... Photon mass density over baryon mass density
-    photbar = param['grhog'] / (param['grhom'] * param['Omegab'] * a)
+    photbar = param['grhog'] / (param['grhom'] *     param['Omegab'] * a)
     pb43 = 4.0 / 3.0 * photbar
 
     # ... massive neutrino thermodynamics
     rhonu = param['rhonu_of_a_spline']( a )
     pnu = param['pnu_of_a_spline']( a ) 
+    rho_plus_p_nu = rhonu+pnu
     ppseudonu = param['ppseudonu_of_a_spline']( a ) # pseudo pressure from CLASS IV, LT11
     
     w_nu = pnu / rhonu
     ca2_nu = w_nu/3.0/(1.0+w_nu)*(5.0-ppseudonu/pnu)  # eq. (3.3) in LT11
     ceff2_nu = ca2_nu
     cvis2_nu = 3.*w_nu*ca2_nu # CLASS's fluid approximation eq. (3.15c) in LT11
-    dpnu = ca2_nu * rhonu * deltanu
+    cg2_nu = w_nu-w_nu/3.0/(1.0+w_nu)*(3.0*w_nu-2.0+ppseudonu/pnu) # CLASS perturbation.c:7078
+    dpnu = cg2_nu * deltanu
     
     # ... compute expansion rate
     grho = (
@@ -470,7 +472,7 @@ def model_synchronous_neutrino_cfa(*, tau, yin, param, kmode, lmaxg, lmaxgp, lma
     tauc    = 1. / opac
     taucprime = tauc * (2*aprimeoa - xeprime/xe)
     F       = tauc / (1+pb43) #CLASS perturbations.c:10072
-    Fprime    = taucprime/(1+pb43) + tauc*pb43*aprimeoa/(1+pb43)**2 #CLASS perturbations.c:10074
+    Fprime  = taucprime/(1+pb43) + tauc*pb43*aprimeoa/(1+pb43)**2 #CLASS perturbations.c:10074
 
 
     # ... background scale factor evolution
@@ -495,7 +497,7 @@ def model_synchronous_neutrino_cfa(*, tau, yin, param, kmode, lmaxg, lmaxgp, lma
     dgtheta = (
         param['grhom'] * (param['Omegac'] * thetac + param['Omegab'] * thetab) / a
         + 4.0 / 3.0 * (param['grhog'] * thetag + param['Neff'] * param['grhor'] * thetar) / a**2
-        + param['Nmnu'] * param['grhor'] * thetanu / a**2
+        + param['Nmnu'] * param['grhor'] * rho_plus_p_nu * thetanu / a**2
     )
     etaprime = 0.5 * dgtheta / kmode**2
     alpha  = (hprime + 6.*etaprime)/2./kmode**2
@@ -503,7 +505,7 @@ def model_synchronous_neutrino_cfa(*, tau, yin, param, kmode, lmaxg, lmaxgp, lma
 
     dgshear = (
         4.0 / 3.0 * (param['grhog'] * shearg + param['Neff'] * param['grhor'] * shearr) / a**2
-        + param['Nmnu'] * param['grhor'] * shearnu / a**2
+        + param['Nmnu'] * param['grhor'] * rho_plus_p_nu * shearnu / a**2
     )
     
     alphaprime = -3*dgshear/(2*kmode**2) + eta - 2*aprimeoa*alpha
@@ -657,15 +659,14 @@ def model_synchronous_neutrino_cfa(*, tau, yin, param, kmode, lmaxg, lmaxgp, lma
     # ... truncate moment expansion
     f = f.at[idxr+lmaxr].set( kmode * y[idxr+lmaxr-1] - (lmaxr + 1) / tau * y[idxr+lmaxr] )
 
-    # --- Massive neutrino equations of motion --------------------------------------------------------
+    # --- Massive neutrino equations of motion, fluid approximation -----------------------------------
     # LT11: CLASS IV: ncdm, Lesgourgues & Tram 2011, https://arxiv.org/abs/1104.2935
-    
     # LT11, eq. (3.1a)
     deltanuprime = (1+w_nu)*(-thetanu - 0.5 * hprime) - 3 * aprimeoa * (ceff2_nu-w_nu) * deltanu
     f = f.at[iq0+0].set( deltanuprime )
     # LT11, eq. (3.1b)
-    thetamnuprime = -aprimeoa * (1-3*ca2_nu) * thetanu + kmode**2 * (ceff2_nu/(1+w_nu) * deltanu - shearnu)
-    f = f.at[iq0+1].set( thetamnuprime )
+    thetanuprime = -aprimeoa * (1-3*ca2_nu) * thetanu + kmode**2 * (ceff2_nu/(1+w_nu) * deltanu - shearnu)
+    f = f.at[iq0+1].set( thetanuprime )
     # LT11, eq. (3.15c)
     sigmanuprime = -3*(1/tau + aprimeoa*(2/3 - ca2_nu - ppseudonu/pnu/3)) * shearnu \
         + 8/3 * cvis2_nu/(1+w_nu) * s_l2 * (thetanu + 0.5*hprime)
@@ -686,19 +687,16 @@ def neutrino_convert_to_fluid(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, l
     nvarnu = 10 + lmaxg + lmaxgp + lmaxr + 3
     y = jnp.zeros((nvarnu))
     
-    drhonu, dpnu, fnu, shearnu = nu_perturb_jax( a, param['amnu'], yin[iq0:iq1], yin[iq1:iq2], yin[iq2:iq3] )
+    drhonu, dpnu, fnu, shearnu = nu_perturb( a, param['amnu'], yin[iq0:iq1], yin[iq1:iq2], yin[iq2:iq3] )
     rhonu = param['rhonu_of_a_spline']( a )
     pnu = param['pnu_of_a_spline']( a ) 
     rho_plus_p = rhonu + pnu
     
     y = y.at[:iq0].set( yin[:iq0] )
-    
-    # y = y.at[iq0+0].set( drhonu / rhonu )
-    # y = y.at[iq0+1].set( kmode*fnu / rho_plus_p )
-    # y = y.at[iq0+2].set( shearnu / rho_plus_p )
-    y = y.at[iq0+0].set( drhonu )
-    y = y.at[iq0+1].set( kmode * fnu * rhonu / rho_plus_p )
-    y = y.at[iq0+2].set( shearnu * rhonu / rho_plus_p )
+
+    y = y.at[iq0+0].set( drhonu / rhonu)
+    y = y.at[iq0+1].set( kmode * fnu / rho_plus_p)
+    y = y.at[iq0+2].set( shearnu / rho_plus_p )
     
     return y
 
@@ -823,7 +821,7 @@ def evolve_one_mode( *, y0, tau_start, tau_max, tau_out, param, kmode, lmaxg, lm
     
     nu_fluid_trigger_tau_over_tau_k = 31
     tauk = 1./kmode
-    tau_neutrino_cfa = jnp.minimum(tauk * nu_fluid_trigger_tau_over_tau_k, tau_max)
+    tau_neutrino_cfa = jnp.minimum(tauk * nu_fluid_trigger_tau_over_tau_k, 0.999*tau_max) # don't go to tau_max so that all modes are converted to massive neutrino approx
     
     saveat = diffrax.SaveAt(ts=tau_out)
     
@@ -852,7 +850,7 @@ def evolve_one_mode( *, y0, tau_start, tau_max, tau_out, param, kmode, lmaxg, lm
         solver=solver,
         t0=sol1.ts[-1],
         t1=tau_max,
-        dt0=tau_neutrino_cfa/2,
+        dt0=tau_neutrino_cfa*1e-2,
         y0=y0_neutrino_cfa,
         # saveat=saveat,
         stepsize_controller=stepsize_controller,

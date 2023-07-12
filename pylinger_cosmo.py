@@ -13,7 +13,7 @@ from jax_cosmo.scipy.integrate import romb, simps
 from functools import partial
 
 @jax.jit
-def ninu1( a : float, amnu: float, nq : int = 1000, qmax : float = 30.) -> tuple[float, float]:
+def nu_background( a : float, amnu: float, nq : int = 1000, qmax : float = 30.) -> tuple[float, float]:
     """ computes the neutrino density and pressure of one flavour of massive neutrinos
         in units of the mean density of one flavour of massless neutrinos
 
@@ -35,7 +35,7 @@ def ninu1( a : float, amnu: float, nq : int = 1000, qmax : float = 30.) -> tuple
     dq   = qmax / nq
     q    = dq * jnp.arange(1,nq+1)
     aq   = a * amnu / q
-    v    = 1 / jnp.sqrt(1 + aq**2)
+    v    = 1 / jnp.sqrt(1 + aq**2)   # = (1/aq) / sqrt(1+1/aq**2)
     qdn  = dq * q**3 / (jnp.exp(q) + 1)
     dum1 = qdn / v
     dum2 = qdn * v
@@ -56,48 +56,8 @@ def ninu1( a : float, amnu: float, nq : int = 1000, qmax : float = 30.) -> tuple
     
     return rhonu[0], pnu[0], ppnu[0]
 
-
-def ninu1_numoy( a : float, amnu: float, nq : int = 1000, qmax : float = 30.) -> tuple[float, float]:
-    """ computes the neutrino density and pressure of one flavour of massive neutrinos
-        in units of the mean density of one flavour of massless neutrinos
-
-    Args:
-        a (float): scale factor
-        amnu (float): neutrino mass in units of neutrino temperature (m_nu*c**2/(k_B*T_nu0).
-        nq (int, optional): number of integration points. Defaults to 1000.
-        qmax (float, optional): maximum momentum. Defaults to 30..
-
-    Returns:
-        tuple[float, float]: rho_nu/rho_nu0, p_nu/p_nu0
-    """
-
-    # const = 7 * np.pi**4 / 120
-    const = 5.682196976983475
-    
-    # q is the comoving momentum in units of k_B*T_nu0/c.
-    # Integrate up to qmax and then use asymptotic expansion for remainder.
-    dq   = qmax / nq
-    q    = dq * jnp.arange(1,nq+1)
-    aq   = a * amnu / q
-    v    = 1 / jnp.sqrt(1 + aq**2)
-    qdn  = dq * q**3 / (jnp.exp(q) + 1)
-    dum1 = qdn / v
-    dum2 = qdn * v
-    
-    rho_spline = scipyinterp.InterpolatedUnivariateSpline(q, dum1)
-    rhonu = rho_spline.integral(0, qmax)
-    p_spline = scipyinterp.InterpolatedUnivariateSpline(q, dum2)
-    pnu = p_spline.integral(0, qmax)
-
-    # Apply asymptotic corrrection for q>qmax and normalize by relativistic
-    # energy density.
-    rhonu = (rhonu / dq + dum1[-1] / dq) / const
-    pnu = (pnu / dq + dum2[-1] / dq) / const / 3
-    
-    return rhonu[0], pnu[0]
-
 @jax.jit
-def nu_perturb_jax_old( a : float, amnu: float, psi0, psi1, psi2, nq : int = 1000, qmax : float = 30.):
+def nu_perturb( a : float, amnu: float, psi0, psi1, psi2, nq : int = 1000, qmax : float = 30.):
     """ Compute the perturbations of density, energy flux, pressure, and
         shear stress of one flavor of massive neutrinos, in units of the mean
         density of one flavor of massless neutrinos, by integrating over 
@@ -136,14 +96,6 @@ def nu_perturb_jax_old( a : float, amnu: float, psi0, psi1, psi2, nq : int = 100
     g3 = g3.at[1:].set( qdn * psi1 )
     g4 = g4.at[1:].set( qdn * psi2 * v )
 
-    # g1_sp = jaxinterp.InterpolatedUnivariateSpline(qq, g1)
-    # g01 = g1_sp.integral(0, qmax0)[0]
-    # g2_sp = jaxinterp.InterpolatedUnivariateSpline(qq, g2)
-    # g02 = g2_sp.integral(0, qmax0)[0]
-    # g3_sp = jaxinterp.InterpolatedUnivariateSpline(qq, g3)
-    # g03 = g3_sp.integral(0, qmax0)[0]
-    # g4_sp = jaxinterp.InterpolatedUnivariateSpline(qq, g4)
-    # g04 = g4_sp.integral(0, qmax0)[0]
     g01 = jnp.trapz(g1, qq)
     g02 = jnp.trapz(g2, qq)
     g03 = jnp.trapz(g3, qq)
@@ -157,123 +109,6 @@ def nu_perturb_jax_old( a : float, amnu: float, psi0, psi1, psi2, nq : int = 100
 
     return drhonu, dpnu, fnu, shearnu
 
-@jax.jit
-def nu_perturb_jax( a : float, amnu: float, psi0, psi1, psi2, nq : int = 1000, qmax : float = 30.):
-    """ Compute the perturbations of density, energy flux, pressure, and
-        shear stress of one flavor of massive neutrinos, in units of the mean
-        density of one flavor of massless neutrinos, by integrating over 
-        momentum.
-
-    Args:
-        a (float): scale factor
-        amnu (float): neutrino mass in units of neutrino temperature (m_nu*c**2/(k_B*T_nu0).
-        psi0 (_type_): 
-        psi1 (_type_): _description_
-        psi2 (_type_): _description_
-        nq (int, optional): _description_. Defaults to 1000.
-        qmax (float, optional): _description_. Defaults to 30..
-
-    Returns:
-        _type_: drhonu, dpnu, fnu, shearnu
-    """
-    nqmax0 = len(psi0)
-    qmax0  = nqmax0 - 0.5
-    # const = 7 * np.pi**4 / 120
-    const = 5.682196976983475
-
-    g1 = jnp.zeros((nqmax0+1))
-    g2 = jnp.zeros((nqmax0+1))
-    g3 = jnp.zeros((nqmax0+1))
-    g4 = jnp.zeros((nqmax0+1))
-    q  = (jnp.arange(1,nqmax0+1) - 0.5)  # so dq == 1
-    qq = jnp.arange(0,nqmax0+1)  # so dq == 1
-    # q.at[0].set(0.0)
-
-    aq = a * amnu / q
-    v = 1 / jnp.sqrt(1 + aq**2)
-    qdn = q**3 / (jnp.exp(q) + 1)
-    g1 = g1.at[1:].set( qdn * psi0 / v )
-    g2 = g2.at[1:].set( qdn * psi0 * v )
-    g3 = g3.at[1:].set( qdn * psi1 )
-    g4 = g4.at[1:].set( qdn * psi2 * v )
-
-    # g1_sp = jaxinterp.InterpolatedUnivariateSpline(qq, g1)
-    # g01 = g1_sp.integral(0, qmax0)[0]
-    # g2_sp = jaxinterp.InterpolatedUnivariateSpline(qq, g2)
-    # g02 = g2_sp.integral(0, qmax0)[0]
-    # g3_sp = jaxinterp.InterpolatedUnivariateSpline(qq, g3)
-    # g03 = g3_sp.integral(0, qmax0)[0]
-    # g4_sp = jaxinterp.InterpolatedUnivariateSpline(qq, g4)
-    # g04 = g4_sp.integral(0, qmax0)[0]
-    g01 = jnp.trapz(g1, qq)
-    g02 = jnp.trapz(g2, qq)
-    g03 = jnp.trapz(g3, qq)
-    g04 = jnp.trapz(g4, qq)
-
-    # Apply asymptotic corrrection for q>qmax0
-    drhonu = (g01 + g1[-1] * 2 / qmax) / const
-    dpnu = (g02 + g2[-1] * 2 / qmax) / const / 3
-    fnu = (g03 + g3[-1] * 2 / qmax) / const
-    shearnu = (g04 + g4[-1] * 2 / qmax) / const * 2 / 3
-
-    return drhonu, dpnu, fnu, shearnu
-
-
-def nu_perturb_numpy( a : float, amnu: float, psi0, psi1, psi2, nq : int = 1000, qmax : float = 30.):
-    """ Compute the perturbations of density, energy flux, pressure, and
-        shear stress of one flavor of massive neutrinos, in units of the mean
-        density of one flavor of massless neutrinos, by integrating over 
-        momentum.
-
-    Args:
-        a (float): scale factor
-        amnu (float): neutrino mass in units of neutrino temperature (m_nu*c**2/(k_B*T_nu0).
-        psi0 (_type_): 
-        psi1 (_type_): _description_
-        psi2 (_type_): _description_
-        nq (int, optional): _description_. Defaults to 1000.
-        qmax (float, optional): _description_. Defaults to 30..
-
-    Returns:
-        _type_: drhonu, dpnu, fnu, shearnu
-    """
-    nqmax0 = len(psi0)
-    qmax0  = nqmax0 - 0.5
-    # const = 7 * np.pi**4 / 120
-    const = 5.682196976983475
-
-    g1 = np.zeros((nqmax0+1))
-    g2 = np.zeros((nqmax0+1))
-    g3 = np.zeros((nqmax0+1))
-    g4 = np.zeros((nqmax0+1))
-    q  = (np.arange(1,nqmax0+1) - 0.5)  # so dq == 1
-    qq = np.arange(0,nqmax0+1)  # so dq == 1
-    # q.at[0].set(0.0)
-
-    aq = a * amnu / q
-    v = 1 / np.sqrt(1 + aq**2)
-    qdn = q**3 / (np.exp(q) + 1)
-    g1[1:] = qdn * psi0 / v
-    g2[1:] = qdn * psi0 * v
-    g3[1:] = qdn * psi1 
-    g4[1:] = qdn * psi2 * v
-
-    g1_sp = scipyinterp.InterpolatedUnivariateSpline(qq, g1)
-    g01 = g1_sp.integral(0, qmax0)
-    g2_sp = scipyinterp.InterpolatedUnivariateSpline(qq, g2)
-    g02 = g2_sp.integral(0, qmax0)
-    g3_sp = scipyinterp.InterpolatedUnivariateSpline(qq, g3)
-    g03 = g3_sp.integral(0, qmax0)
-    g4_sp = scipyinterp.InterpolatedUnivariateSpline(qq, g4)
-    g04 = g4_sp.integral(0, qmax0)
-
-    # Apply asymptotic corrrection for q>qmax0
-    drhonu = (g01 + g1[-1] * 2 / qmax) / const
-    dpnu = (g02 + g2[-1] * 2 / qmax) / const / 3
-    fnu = (g03 + g3[-1] * 2 / qmax) / const
-    shearnu = (g04 + g4[-1] * 2 / qmax) / const * 2 / 3
-
-    return drhonu, dpnu, fnu, shearnu
 
 # @partial(jax.jit, static_argnames=("params",))
 @jax.jit
@@ -327,7 +162,7 @@ class cosmo:
         a = jnp.geomspace(amin, amax, num_thermo)
 
         # Compute the neutrino density and pressure
-        rhonu_, pnu_, ppnu_ = jax.vmap( lambda a_ : ninu1( a_, amnu ), in_axes=0 )( a )
+        rhonu_, pnu_, ppnu_ = jax.vmap( lambda a_ : nu_background( a_, amnu ), in_axes=0 )( a )
         rhonu_spline =  jaxinterp.InterpolatedUnivariateSpline(a, rhonu_)
         self.param['rhonu_of_a_spline']     = rhonu_spline
         self.param['pnu_of_a_spline']       = jaxinterp.InterpolatedUnivariateSpline(a, pnu_)
