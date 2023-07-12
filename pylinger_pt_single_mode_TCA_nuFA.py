@@ -826,6 +826,8 @@ def evolve_one_mode( *, y0, tau_start, tau_max, tau_out, param, kmode, lmaxg, lm
     tauk = 1./kmode
     tau_neutrino_cfa = jnp.minimum(tauk * nu_fluid_trigger_tau_over_tau_k, 0.999*tau_max) # don't go to tau_max so that all modes are converted to massive neutrino approx
     
+    tau_start = 0.01 #jnp.minimum(param['tau_of_a_spline'](1e-6), jnp.minimum(0.1 * tauk, jnp.min(tau_out)/2))
+    
     # create list of saveat times for first and second part of evolution
     saveat1 = diffrax.SaveAt(ts= jnp.where(tau_out<tau_neutrino_cfa,tau_out,tau_neutrino_cfa) )
     saveat2 = diffrax.SaveAt(ts= jnp.where(tau_out>=tau_neutrino_cfa,tau_out,tau_neutrino_cfa) )
@@ -842,11 +844,11 @@ def evolve_one_mode( *, y0, tau_start, tau_max, tau_out, param, kmode, lmaxg, lm
         solver=solver,
         t0=tau_start,
         t1=tau_neutrino_cfa,
-        dt0=jnp.minimum(tau_start/2, 0.1*(tau_neutrino_cfa-tau_start)),
+        dt0=jnp.minimum(tau_start/2, 0.5*(tau_neutrino_cfa-tau_start)),
         y0=y0,
         saveat=saveat1,
         stepsize_controller=stepsize_controller,
-        max_steps=1024,
+        max_steps=4096,
     )
     
     # convert neutrinos to fluid by integrating over the momentum bins
@@ -859,11 +861,11 @@ def evolve_one_mode( *, y0, tau_start, tau_max, tau_out, param, kmode, lmaxg, lm
         solver=solver,
         t0=sol1.ts[-1],
         t1=tau_max,
-        dt0=jnp.minimum(tau_neutrino_cfa*1e-2, 0.1*(tau_max - sol1.ts[-1])),
+        dt0=jnp.minimum(tau_neutrino_cfa*0.5, 0.5*(tau_max - sol1.ts[-1])),
         y0=y0_neutrino_cfa,
         saveat=saveat2,
         stepsize_controller=stepsize_controller,
-        max_steps=1024,
+        max_steps=4096,
     )
     y1_converted = jax.vmap( 
         lambda tau, yin : neutrino_convert_to_fluid(tau=tau, yin=yin, param=param, kmode=kmode, lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax ), 
@@ -918,7 +920,7 @@ def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k 
 
     # determine output times from aexp_out
     tau_out = jax.vmap( lambda a: param['tau_of_a_spline'](a) )(aexp_out)
-    tau_start = jnp.minimum(1e-3 / jnp.max(kmodes), 0.1)
+    tau_start = 0.2 #jnp.minimum(1e-3 / jnp.max(kmodes), 0.1)
     tau_max = jnp.max(tau_out)
     nout = aexp_out.shape[0]
     param['nout'] = nout
