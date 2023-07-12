@@ -739,8 +739,7 @@ def adiabatic_ics( *, tau: float, param, kmodes, num_k, nvar, lmaxg, lmaxgp, lma
     # .. isentropic ("adiabatic") initial conditions
     psi = -1.0
     C = (15.0 + 4.0 * fracnu) / 20.0 * psi
-    akt2 = kmodes * tau
-    akt2 *= akt2
+    akt2 = (kmodes * tau)**2
     h = C * akt2 * (1.0 - 0.2 * yrad)
     eta = 2.0 * C - (5.0 + 4.0 * fracnu) / 6.0 / (15.0 + 4.0 * fracnu) * C * akt2 * (1.0 - yrad / 3.0)
     f1 = (23.0 + 4.0 * fracnu) / (15.0 + 4.0 * fracnu)
@@ -808,25 +807,33 @@ def adiabatic_ics( *, tau: float, param, kmodes, num_k, nvar, lmaxg, lmaxgp, lma
 @partial(jax.jit, static_argnames=('lmaxg', 'lmaxgp', 'lmaxr', 'lmaxnu', 'nqmax', 'rtol', 'atol'))
 def evolve_one_mode( *, y0, tau_start, tau_max, tau_out, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, nqmax, rtol, atol ):
 
+    # ... wrapper for model1: synchronous gauge without any optimizations, effectively this is Ma & Bertschinger 1995 
+    # ... plus CLASS tight coupling approximation (Blas, Lesgourgues & Tram 2011, CLASS II)
     model1 = diffrax.ODETerm( 
         lambda tau, y , params : 
             model_synchronous( tau=tau, yin=y, param=param, kmode=kmode, lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax ) 
     )
     
+    # ... wrapper for model2: synchronous gauge with neutrino fluid approximation, following Lesgourgues & Tram 2011 (CLASS IV)
     model2 = diffrax.ODETerm( 
         lambda tau, y , params : 
-            # model_synchronous( tau=tau, yin=y, param=param, kmode=kmode, lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax ) 
             model_synchronous_neutrino_cfa( tau=tau, yin=y, param=param, kmode=kmode, lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax ) 
     )
     
-    nu_fluid_trigger_tau_over_tau_k = 31
+    # ... switch between model1 and model2 depending on tau
+    nu_fluid_trigger_tau_over_tau_k = 31 # value taken from default CLASS settings
+
     tauk = 1./kmode
     tau_neutrino_cfa = jnp.minimum(tauk * nu_fluid_trigger_tau_over_tau_k, 0.999*tau_max) # don't go to tau_max so that all modes are converted to massive neutrino approx
     
-    saveat = diffrax.SaveAt(ts=tau_out)
+    # create list of saveat times for first and second part of evolution
+    saveat1 = diffrax.SaveAt(ts= jnp.where(tau_out<tau_neutrino_cfa,tau_out,tau_neutrino_cfa) )
+    saveat2 = diffrax.SaveAt(ts= jnp.where(tau_out>=tau_neutrino_cfa,tau_out,tau_neutrino_cfa) )
     
+    # create solver, we use the Kvaerno5 solver, which is a 5th order implicit solver
     solver = diffrax.Kvaerno5()
     
+    # create stepsize controller, we use a PID controller
     stepsize_controller = diffrax.PIDController(rtol=rtol, atol=atol, pcoeff=0.4, icoeff=0.3, dcoeff=0)
     
     # solve before neutrinos become fluid
@@ -835,30 +842,35 @@ def evolve_one_mode( *, y0, tau_start, tau_max, tau_out, param, kmode, lmaxg, lm
         solver=solver,
         t0=tau_start,
         t1=tau_neutrino_cfa,
-        dt0=tau_start/2,
+        dt0=jnp.minimum(tau_start/2, 0.1*(tau_neutrino_cfa-tau_start)),
         y0=y0,
-        # saveat=saveat,
+        saveat=saveat1,
         stepsize_controller=stepsize_controller,
-        max_steps=10001,
+        max_steps=1024,
     )
     
-    y0_neutrino_cfa = neutrino_convert_to_fluid( tau=sol1.ts[-1], yin=sol1.ys[-1,:], param=param, kmode=kmode, lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax )
-    # y0_neutrino_cfa = jnp.copy( sol1.ys[-1,:] )
+    # convert neutrinos to fluid by integrating over the momentum bins
+    y0_neutrino_cfa = neutrino_convert_to_fluid( tau=sol1.ts[-1], yin=sol1.ys[-1,:], param=param, kmode=kmode, 
+                                            lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax )
     
+    # solve after neutrinos become fluid
     sol2 = diffrax.diffeqsolve(
         terms=model2,
         solver=solver,
         t0=sol1.ts[-1],
         t1=tau_max,
-        dt0=tau_neutrino_cfa*1e-2,
+        dt0=jnp.minimum(tau_neutrino_cfa*1e-2, 0.1*(tau_max - sol1.ts[-1])),
         y0=y0_neutrino_cfa,
-        # saveat=saveat,
+        saveat=saveat2,
         stepsize_controller=stepsize_controller,
-        max_steps=10001,
+        max_steps=1024,
     )
+    y1_converted = jax.vmap( 
+        lambda tau, yin : neutrino_convert_to_fluid(tau=tau, yin=yin, param=param, kmode=kmode, lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax ), 
+        in_axes=0, out_axes=0 )( sol1.ts, yin=sol1.ys )
     
     # solve after neutrinos become fluid
-    return sol2.ys
+    return jnp.where( tau_out[:,None]<tau_neutrino_cfa, y1_converted, sol2.ys )
 
 
 # @partial(jax.jit, static_argnames=("num_k","lmaxg","lmaxgp", "lmaxr", "lmaxnu","nqmax","rtol","atol"))
@@ -906,7 +918,7 @@ def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k 
 
     # determine output times from aexp_out
     tau_out = jax.vmap( lambda a: param['tau_of_a_spline'](a) )(aexp_out)
-    tau_start = 0.1 #jnp.minimum(1e-3 / jnp.max(kmodes), 0.1)
+    tau_start = jnp.minimum(1e-3 / jnp.max(kmodes), 0.1)
     tau_max = jnp.max(tau_out)
     nout = aexp_out.shape[0]
     param['nout'] = nout
