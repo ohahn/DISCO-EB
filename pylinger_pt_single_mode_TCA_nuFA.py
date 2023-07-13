@@ -3,6 +3,7 @@ import jax.numpy as jnp
 import jax_cosmo.scipy.interpolate as jaxinterp
 from pylinger_cosmo import cosmo, nu_perturb
 from functools import partial
+from jaxopt import Bisection
 import diffrax
 
 @partial(jax.jit, static_argnames=('lmaxg', 'lmaxgp', 'lmaxr', 'lmaxnu', 'nqmax'))
@@ -803,6 +804,68 @@ def adiabatic_ics( *, tau: float, param, kmodes, num_k, nvar, lmaxg, lmaxgp, lma
     
     return y
 
+@jax.jit
+def determine_starting_time( *, param, k ):
+    # ADOPTED from CLASS:
+    # largest wavelengths start being sampled when universe is sufficiently opaque. This is quantified in terms of the ratio of thermo to hubble time scales, 
+    # \f$ \tau_c/\tau_H \f$. Start when start_largek_at_tau_c_over_tau_h equals this ratio. Decrease this value to start integrating the wavenumbers earlier 
+    # in time.
+    start_small_k_at_tau_c_over_tau_h = 0.0015 
+
+    # ADOPTED from CLASS:
+    #  largest wavelengths start being sampled when mode is sufficiently outside Hubble scale. This is quantified in terms of the ratio of hubble time scale 
+    #  to wavenumber time scale, \f$ \tau_h/\tau_k \f$ which is roughly equal to (k*tau). Start when this ratio equals start_large_k_at_tau_k_over_tau_h. 
+    #  Decrease this value to start integrating the wavenumbers earlier in time. 
+    start_large_k_at_tau_h_over_tau_k = 0.07
+
+    tau0 = param['taumin']
+    tau1 = param['taumax']
+    akthom = 2.3048e-9 * (1.0 - param['YHe']) * param['Omegab'] * param['H0']**2
+
+    tau_k = 1.0/k
+
+    def get_tauc_tauH( tau):
+        xe = param['xe_of_tau_spline']( tau )
+        a = param['a_of_tau_spline']( tau )
+        opac = xe * akthom / a**2
+
+        rhonu = param['rhonu_of_a_spline']( a )
+        aH = jnp.sqrt( param['grhom'] * param['Omegam'] / a
+                        + (param['grhog'] + param['grhor'] * (param['Neff'] + param['Nmnu'] * rhonu)) / a**2
+                        + param['grhom'] * param['OmegaL'] * a**2
+                        + param['grhom'] * param['Omegak'] )
+        return 1.0/opac, 1.0/aH
+
+    def get_tauH( tau):
+        a = param['a_of_tau_spline']( tau )
+
+        rhonu = param['rhonu_of_a_spline']( a )
+        aH = jnp.sqrt( param['grhom'] * param['Omegam'] / a
+                        + (param['grhog'] + param['grhor'] * (param['Neff'] + param['Nmnu'] * rhonu)) / a**2
+                        + param['grhom'] * param['OmegaL'] * a**2
+                        + param['grhom'] * param['Omegak'] )
+
+        return 1.0 / aH
+
+    # condition for small k: tau_c(a) / tau_H(a) < start_small_k_at_tau_c_over_tau_h
+    def cond_small_k( logtau ):
+        tau_c, tau_H = get_tauc_tauH( jnp.exp(logtau) )
+        return tau_c - start_small_k_at_tau_c_over_tau_h *  tau_H
+
+    # condition for large k: tau_H(a) / tau_k < start_large_k_at_tau_k_over_tau_h
+    def cond_large_k( logtau ):
+        tau_h = get_tauH( jnp.exp(logtau) )
+        return tau_h - start_large_k_at_tau_h_over_tau_k * tau_k
+
+    
+    logtau_small_k =  Bisection(optimality_fun=cond_small_k, lower=jnp.log(tau0), upper=jnp.log(tau1), maxiter=10, check_bracket=False).run().params
+    logtau_large_k =  Bisection(optimality_fun=cond_large_k, lower=jnp.log(tau0), upper=jnp.log(tau1), maxiter=10, check_bracket=False).run().params
+
+    return jnp.exp(jnp.minimum(logtau_small_k, logtau_large_k))
+
+
+
+    
 
 @partial(jax.jit, static_argnames=('lmaxg', 'lmaxgp', 'lmaxr', 'lmaxnu', 'nqmax', 'rtol', 'atol'))
 def evolve_one_mode( *, y0, tau_start, tau_max, tau_out, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, nqmax, rtol, atol ):
@@ -820,6 +883,10 @@ def evolve_one_mode( *, y0, tau_start, tau_max, tau_out, param, kmode, lmaxg, lm
             model_synchronous_neutrino_cfa( tau=tau, yin=y, param=param, kmode=kmode, lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax ) 
     )
     
+    
+    tau_start = determine_starting_time( param=param, k=kmode )
+
+
     # ... switch between model1 and model2 depending on tau
     nu_fluid_trigger_tau_over_tau_k = 31 # value taken from default CLASS settings
 
