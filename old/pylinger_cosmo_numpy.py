@@ -1,4 +1,4 @@
-import pylinger_thermo as pthermo
+import pylinger_thermodynamics as pthermo
 import numpy as np
 
 from scipy.integrate import solve_ivp, quad

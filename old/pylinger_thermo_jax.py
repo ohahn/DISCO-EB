@@ -3,8 +3,6 @@ import jax.numpy as jnp
 import numpy as onp
 from typing import Tuple
 from functools import partial
-from pylinger_jax_utils import get_grho_and_adotrad
-
 
 def ionize(tempb: float, a: float, adot: float, dtau: float, xe: float, YHe: float, H0: float, Omegab: float) -> float:
     # ... switch for fully implicit (switch=1.0) or semi implicit (switch=0.5);
@@ -96,9 +94,12 @@ def compute(*, taumin: float, taumax: float, nthermo: int, Tcmb: float, YHe: flo
             Omegam: float, OmegaL: float, Neff: float, Nmnu: float, rhonu_sp):
     # Output: a, adot, tau, tb, xe_raw, xe, xHeI, xHeII, cs2
 
-    thomc0 = 5.0577e-8 * Tcmb**4
-    dlntau = jnp.log(taumax / taumin) / (nthermo - 1)
-    grhom, grhog, grhor, adotrad = get_grho_and_adotrad(H0, Tcmb)
+    thomc0  = 5.0577e-8 * Tcmb**4
+    dlntau  = jnp.log(taumax / taumin) / (nthermo - 1)
+    grhom   = 3.3379e-11 * H0 ** 2
+    grhog   = 1.4952e-13 * Tcmb ** 4
+    grhor   = 3.3957e-14 * Tcmb ** 4
+    adotrad = 2.8948e-7 * Tcmb ** 2
 
     # ... initial conditions : assume radiation-dominated universe
     tau0 = taumin
@@ -126,7 +127,7 @@ def compute(*, taumin: float, taumax: float, nthermo: int, Tcmb: float, YHe: flo
         # integrate Friedmann equation using inverse trapezoidal rule.
         new_a = a + adot * dtau
 
-        rhonu = rhonu_sp( new_a )
+        rhonu = rhonu_sp.evaluate( new_a )
         grho = (
             grhom * Omegam / new_a
             + (grhog + grhor * (Neff + Nmnu * rhonu)) / new_a**2
@@ -148,7 +149,7 @@ def compute(*, taumin: float, taumax: float, nthermo: int, Tcmb: float, YHe: flo
         # ... more accuracy is required (unlikely) then this can be iterated with
         # ... the solution of the ionization equation
         fe = (1.0 - YHe) * xe / (1.0 - 0.75 * YHe + (1.0 - YHe) * xe)
-        thomc = thomc0 * fe / adothalf / ahalf**3
+        thomc = thomc0 * fe / (adothalf * ahalf**3)  # <<--- line potentially causing NaNs in single precision autodiff mode, TODO:fixme
         etc = jnp.exp(-thomc * (new_a - a))
         a2t = a**2 * (tb - tg0) * etc - Tcmb / thomc * (1.0 - etc)
         # ... use 2nd order Taylor if fe is small to avoid numerical problems with single precision

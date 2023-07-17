@@ -1,7 +1,7 @@
 import numpy as np
 
 from pylinger_cosmo_numpy import cosmo, nu_perturb_numpy, get_tau
-from pylinger_thermo import thermal_history
+from pylinger_thermodynamics import thermal_history
 
 from scipy.integrate import solve_ivp
 
