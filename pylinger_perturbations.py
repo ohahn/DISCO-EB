@@ -291,7 +291,7 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
     radiation_streaming_trigger_tau_c_over_tau = 5.0    # value taken from CLASS, not used (yet)
     radiation_streaming_trigger_tau_over_tau_k = 45.    # value taken from CLASS, not used (yet)
 
-    tauh = 1./aprimeoa  # TBC: or 1./(aprimeoa*a)?
+    tauh = 1./aprimeoa
     tauk = 1./kmode
     
     f = jax.lax.cond(
@@ -811,12 +811,12 @@ def adiabatic_ics_one_mode( *, tau: float, param, kmode, nvar, lmaxg, lmaxgp, lm
     return y
 
 # @jax.jit
-def determine_starting_time( *, omegam, omegab, param, k ):
+def determine_starting_time( *, param, k ):
     # ADOPTED from CLASS:
     # largest wavelengths start being sampled when universe is sufficiently opaque. This is quantified in terms of the ratio of thermo to hubble time scales, 
     # \f$ \tau_c/\tau_H \f$. Start when start_largek_at_tau_c_over_tau_h equals this ratio. Decrease this value to start integrating the wavenumbers earlier 
     # in time.
-    start_small_k_at_tau_c_over_tau_h = 0.0015 
+    start_small_k_at_tau_c_over_tau_h = 0.00001 
 
     # ADOPTED from CLASS:
     #  largest wavelengths start being sampled when mode is sufficiently outside Hubble scale. This is quantified in terms of the ratio of hubble time scale 
@@ -826,46 +826,45 @@ def determine_starting_time( *, omegam, omegab, param, k ):
 
     tau0 = param['taumin']
     tau1 = param['taumax']
-    akthom = 2.3048e-9 * (1.0 - param['YHe']) * omegab * param['H0']**2
+    akthom = 2.3048e-9 * (1.0 - param['YHe']) * param['Omegab'] * param['H0']**2
 
     tau_k = 1.0/k
 
-    def get_tauc_tauH( tau, omegam, omegab, param ):
+    def get_tauc_tauH( tau, param ):
         xe = param['xe_of_tau_spline'].evaluate( tau )
         a = param['a_of_tau_spline'].evaluate( tau )
         opac = xe * akthom / a**2
 
         rhonu = param['rhonu_of_a_spline'].evaluate( a )
-        aH = jnp.sqrt( param['grhom'] * omegam / a
+        aprimeoa = jnp.sqrt( (param['grhom'] * param['Omegam'] / a
                         + (param['grhog'] + param['grhor'] * (param['Neff'] + param['Nmnu'] * rhonu)) / a**2
                         + param['grhom'] * param['OmegaL'] * a**2
-                        + param['grhom'] * param['Omegak'] )
-        return 1.0/opac, 1.0/aH
+                        + param['grhom'] * param['Omegak'])/3.0 )
+        return 1.0/opac, 1.0/aprimeoa
 
-    def get_tauH( tau, omegam, omegab, param ):
+    def get_tauH( tau, param ):
         a = param['a_of_tau_spline'].evaluate( tau )
 
         rhonu = param['rhonu_of_a_spline'].evaluate( a )
-        aH = jnp.sqrt( param['grhom'] * omegam / a
+        aprimeoa = jnp.sqrt( (param['grhom'] * param['Omegam'] / a
                         + (param['grhog'] + param['grhor'] * (param['Neff'] + param['Nmnu'] * rhonu)) / a**2
                         + param['grhom'] * param['OmegaL'] * a**2
-                        + param['grhom'] * param['Omegak'] )
-
-        return 1.0 / aH
+                        + param['grhom'] * param['Omegak'])/3.0 )
+        return 1.0/aprimeoa
 
     # condition for small k: tau_c(a) / tau_H(a) < start_small_k_at_tau_c_over_tau_h
-    def cond_small_k( logtau ):
-        tau_c, tau_H = get_tauc_tauH( jnp.exp(logtau), omegam, omegab, param )
-        return tau_c - start_small_k_at_tau_c_over_tau_h *  tau_H
+    def cond_small_k( logtau, param ):
+        tau_c, tau_H = get_tauc_tauH( jnp.exp(logtau), param )
+        return tau_c/tau_H - start_small_k_at_tau_c_over_tau_h
 
     # condition for large k: tau_H(a) / tau_k < start_large_k_at_tau_k_over_tau_h
-    def cond_large_k( logtau ):
-        tau_h = get_tauH( jnp.exp(logtau), omegam, omegab, param )
-        return tau_h - start_large_k_at_tau_h_over_tau_k * tau_k
+    def cond_large_k( logtau, param ):
+        tau_H = get_tauH( jnp.exp(logtau), param )
+        return tau_H/tau_k - start_large_k_at_tau_h_over_tau_k
 
     
-    logtau_small_k =  Bisection(optimality_fun=cond_small_k, lower=jnp.log(tau0), upper=jnp.log(tau1), maxiter=10, check_bracket=False).run().params
-    logtau_large_k =  Bisection(optimality_fun=cond_large_k, lower=jnp.log(tau0), upper=jnp.log(tau1), maxiter=10, check_bracket=False).run().params
+    logtau_small_k =  Bisection(optimality_fun=lambda lt : cond_small_k(lt,param), lower=jnp.log(tau0), upper=jnp.log(tau1), maxiter=11, check_bracket=False).run().params
+    logtau_large_k =  Bisection(optimality_fun=lambda lt : cond_large_k(lt,param), lower=jnp.log(tau0), upper=jnp.log(tau1), maxiter=11, check_bracket=False).run().params
 
     return jnp.exp(jnp.minimum(logtau_small_k, logtau_large_k))
 
@@ -878,7 +877,9 @@ class VectorField(eqx.Module):
     
 
 @partial(jax.jit, static_argnames=('lmaxg', 'lmaxgp', 'lmaxr', 'lmaxnu', 'nqmax'))
-def evolve_one_mode( *, tau_max, tau_out, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, nqmax, rtol, atol ):
+def evolve_one_mode( *, tau_max, tau_out, param, kmode, 
+                        lmaxg : int = 12, lmaxgp : int = 12, lmaxr : int = 17, lmaxnu : int = 17, \
+                        nqmax : int = 15, rtol: float = 1e-3, atol: float = 1e-4 ):
 
     # ... wrapper for model1: synchronous gauge without any optimizations, effectively this is Ma & Bertschinger 1995 
     # ... plus CLASS tight coupling approximation (Blas, Lesgourgues & Tram 2011, CLASS II)
@@ -897,8 +898,8 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode, lmaxg, lmaxgp, lmaxr, lm
     nvar   = 7 + (lmaxg + 1) + (lmaxgp + 1) + (lmaxr + 1) + nqmax * (lmaxnu + 1)
 
     # ... set adiabatic ICs
-    # tau_start = determine_starting_time( omegam=omegam, omegab=omegab, param=param, k=kmode )
-    tau_start = 0.01 #jnp.minimum(param['tau_of_a_spline'](1e-6), jnp.minimum(0.1 * tauk, jnp.min(tau_out)/2))
+    tau_start = determine_starting_time( param=param, k=kmode )
+    # tau_start = 0.01 #jnp.minimum(param['tau_of_a_spline'](1e-6), jnp.minimum(0.1 * tauk, jnp.min(tau_out)/2))
     y0 = adiabatic_ics_one_mode( tau=tau_start, param=param, kmode=kmode, nvar=nvar, 
                        lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax )
 
@@ -962,7 +963,7 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode, lmaxg, lmaxgp, lmaxr, lm
     return jnp.where( tau_out[:,None]<tau_neutrino_cfa, y1_converted, sol2.ys )
 
 
-# @partial(jax.jit, static_argnames=("num_k","lmaxg","lmaxgp", "lmaxr", "lmaxnu","nqmax","rtol","atol"))
+@partial(jax.jit, static_argnames=("num_k","lmaxg","lmaxgp", "lmaxr", "lmaxnu","nqmax","rtol","atol"))
 def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k : int, \
                          lmaxg : int = 12, lmaxgp : int = 12, lmaxr : int = 17, lmaxnu : int = 17, \
                          nqmax : int = 15, rtol: float = 1e-3, atol: float = 1e-4 ):
