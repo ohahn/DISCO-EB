@@ -816,7 +816,7 @@ def determine_starting_time( *, param, k ):
     # largest wavelengths start being sampled when universe is sufficiently opaque. This is quantified in terms of the ratio of thermo to hubble time scales, 
     # \f$ \tau_c/\tau_H \f$. Start when start_largek_at_tau_c_over_tau_h equals this ratio. Decrease this value to start integrating the wavenumbers earlier 
     # in time.
-    start_small_k_at_tau_c_over_tau_h = 0.00001 
+    start_small_k_at_tau_c_over_tau_h = 0.0015 
 
     # ADOPTED from CLASS:
     #  largest wavelengths start being sampled when mode is sufficiently outside Hubble scale. This is quantified in terms of the ratio of hubble time scale 
@@ -825,7 +825,7 @@ def determine_starting_time( *, param, k ):
     start_large_k_at_tau_h_over_tau_k = 0.07
 
     tau0 = param['taumin']
-    tau1 = param['taumax']
+    tau1 = param['tau_of_a_spline'].evaluate( 1e-2 ) # don't start after a=0.01
     akthom = 2.3048e-9 * (1.0 - param['YHe']) * param['Omegab'] * param['H0']**2
 
     tau_k = 1.0/k
@@ -855,16 +855,16 @@ def determine_starting_time( *, param, k ):
     # condition for small k: tau_c(a) / tau_H(a) < start_small_k_at_tau_c_over_tau_h
     def cond_small_k( logtau, param ):
         tau_c, tau_H = get_tauc_tauH( jnp.exp(logtau), param )
-        return tau_c/tau_H - start_small_k_at_tau_c_over_tau_h
+        return tau_c/tau_H/start_small_k_at_tau_c_over_tau_h - 1.0
 
     # condition for large k: tau_H(a) / tau_k < start_large_k_at_tau_k_over_tau_h
     def cond_large_k( logtau, param ):
         tau_H = get_tauH( jnp.exp(logtau), param )
-        return tau_H/tau_k - start_large_k_at_tau_h_over_tau_k
+        return tau_H/tau_k/start_large_k_at_tau_h_over_tau_k - 1.0
 
     
-    logtau_small_k =  Bisection(optimality_fun=lambda lt : cond_small_k(lt,param), lower=jnp.log(tau0), upper=jnp.log(tau1), maxiter=11, check_bracket=False).run().params
-    logtau_large_k =  Bisection(optimality_fun=lambda lt : cond_large_k(lt,param), lower=jnp.log(tau0), upper=jnp.log(tau1), maxiter=11, check_bracket=False).run().params
+    logtau_small_k =  Bisection(optimality_fun=lambda lt : cond_small_k(lt,param), lower=jnp.log(tau0), upper=jnp.log(tau1), maxiter=8, check_bracket=False).run().params
+    logtau_large_k =  Bisection(optimality_fun=lambda lt : cond_large_k(lt,param), lower=jnp.log(tau0), upper=jnp.log(tau1), maxiter=8, check_bracket=False).run().params
 
     return jnp.exp(jnp.minimum(logtau_small_k, logtau_large_k))
 
