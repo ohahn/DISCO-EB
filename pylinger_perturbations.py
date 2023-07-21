@@ -33,7 +33,7 @@ def compute_time_scales( *, k, a, param ):
 
     return tauh, tauk, tauc
 
-# @partial(jax.jit, static_argnames=('lmaxg', 'lmaxgp', 'lmaxr', 'lmaxnu', 'nqmax'))
+@partial(jax.jit, static_argnames=('lmaxg', 'lmaxgp', 'lmaxr', 'lmaxnu', 'nqmax'))
 def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, nqmax):     
     """Solve the synchronous gauge perturbation equations for a single mode.
 
@@ -375,7 +375,7 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
 
     return f.flatten()
 
-# @partial(jax.jit, static_argnames=('lmaxg', 'lmaxgp', 'lmaxr'))
+@partial(jax.jit, static_argnames=('lmaxg', 'lmaxgp', 'lmaxr'))
 def model_synchronous_neutrino_cfa(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr):
     """Solve the synchronous gauge perturbation equations for a single mode.
 
@@ -930,7 +930,6 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
 
     tauk = 1./kmode
     tau_neutrino_cfa = jnp.minimum(tauk * nu_fluid_trigger_tau_over_tau_k, 0.999*tau_max) # don't go to tau_max so that all modes are converted to massive neutrino approx
-    tau_neutrino_cfa = tau_max
 
     # create list of saveat times for first and second part of evolution
     saveat1 = drx.SaveAt(ts= jnp.where(tau_out<tau_neutrino_cfa,tau_out,tau_neutrino_cfa) )
