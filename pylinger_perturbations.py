@@ -6,6 +6,33 @@ from jaxopt import Bisection
 import diffrax as drx
 import equinox as eqx
 
+def compute_time_scales( *, k, a, param ):
+    rhonu = param['rhonu_of_a_spline'].evaluate(a)
+
+    grho = (
+        param['grhom'] * param['Omegam'] / a
+        + (param['grhog'] + param['grhor'] * (param['Neff'] + param['Nmnu'] * rhonu)) / a**2
+        + param['grhom'] * param['OmegaL'] * a**2
+        + param['grhom'] * param['Omegak']
+    )
+    aprimeoa = jnp.sqrt(grho / 3.0)
+
+    # ... Thomson opacity coefficient = n_e sigma_T
+    akthom = 2.3048e-9 * (1.0 - param['YHe']) * param['Omegab'] * param['H0']**2
+
+    # dkappa/dtau (dkappa/dtau = a n_e x_e sigma_T = a^{-2} n_e(today) x_e sigma_T in units of 1/Mpc) */
+    # pvecthermo[pth->index_th_dkappa] = (1.+z) * (1.+z) * pth->n_e * x0 * sigmaTrescale * _sigma_ * _Mpc_over_m_;
+
+    # ... Thomson opacity
+    tau = param['tau_of_a_spline'].evaluate(a)
+    xe = param['xe_of_tau_spline'].evaluate(tau)
+    opac    = xe * akthom / a**2
+    tauc    = 1. / opac
+    tauh = 1./aprimeoa
+    tauk = 1./k
+
+    return tauh, tauk, tauc
+
 # @partial(jax.jit, static_argnames=('lmaxg', 'lmaxgp', 'lmaxr', 'lmaxnu', 'nqmax'))
 def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, nqmax):     
     """Solve the synchronous gauge perturbation equations for a single mode.
@@ -717,11 +744,11 @@ def adiabatic_ics_one_mode( *, tau: float, param, kmode, nvar, lmaxg, lmaxgp, lm
     iq4 = iq3 + nqmax
 
     y = jnp.zeros((nvar))
-    a = tau * param['adotrad']
-    a2 = a**2
+    a = param['a_of_tau_spline'].evaluate(tau)
 
     rhonu = param['rhonu_of_a_spline'].evaluate(a)
     pnu = param['pnu_of_a_spline'].evaluate(a)
+    
     grho = (
         param['grhom'] * param['Omegam'] / a
         + (param['grhog'] + param['grhor'] * (param['Neff'] + param['Nmnu'] * rhonu)) / a**2
@@ -731,11 +758,10 @@ def adiabatic_ics_one_mode( *, tau: float, param, kmode, nvar, lmaxg, lmaxgp, lm
     gpres = (
         (param['grhog'] + param['grhor'] * param['Neff']) / 3.0 + param['grhor'] * param['Nmnu'] * pnu
     ) / a**2 - param['grhom'] * param['OmegaL'] * a**2
-    aprimeoa = jnp.sqrt(grho / 3.0)
 
     s = grho + gpres
 
-    fracnu = param['grhor'] * (param['Neff'] + param['Nmnu']) * 4.0 / 3.0 / a2 / s
+    fracnu = param['grhor'] * (param['Neff'] + param['Nmnu']) * 4.0 / 3.0 / a**2 / s
 
     # ... use yrad=rho_matter/rho_rad to correct initial conditions for matter+radiation
     yrad = (
@@ -781,20 +807,13 @@ def adiabatic_ics_one_mode( *, tau: float, param, kmode, nvar, lmaxg, lmaxgp, lm
     # ... Photons (total intensity and polarization)
     y = y.at[7].set( deltag )
     y = y.at[8].set( thetag )
-    y = y.at[8 + lmaxg].set( 0.0 ) # shearg
-    y = y.at[9 + lmaxg].set( 0.0 ) # polarization term
-
-    # for l in range(1, lmax):
-    #     y = y.at[:, 8 + l].set( 0.0 )
-    #     y = y.at[:, 9 + lmax + l].set( 0.0 )
-
+    # shear and polarization are zero at the initial time
+    
     # ... massless neutrinos
     y = y.at[ 9 + lmaxg + lmaxgp].set( deltar )
     y = y.at[10 + lmaxg + lmaxgp].set( thetar )
     y = y.at[11 + lmaxg + lmaxgp].set( shearr * 2.0 )
-
-    # for l in range(2, lmax):
-    y = y.at[10 + (lmaxg + 1) + (lmaxgp + 1):].set( 0.0 )
+    # higher moments are zero at the initial time
 
     # ... massive neutrinos
     # if params.cp.Nmnu > 0:
@@ -806,7 +825,7 @@ def adiabatic_ics_one_mode( *, tau: float, param, kmode, nvar, lmaxg, lmaxgp, lm
     y = y.at[iq0:iq1].set( -0.25 * dlfdlq * deltan )
     y = y.at[iq1:iq2].set( -dlfdlq * thetan / v / kmode / 3.0 )
     y = y.at[iq2:iq3].set( -0.5 * dlfdlq * shearn )
-    y = y.at[iq3:].set( 0.0 )
+    # higher moments are zero at the initial time
     
     return y
 
@@ -894,12 +913,14 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
                                                                   lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr ) )
     model2 = drx.ODETerm( model2_ )
     
-    # determine the number of active variables (i.e. the number of equations), absent any optimizations
+    # ... determine the number of active variables (i.e. the number of equations), absent any optimizations
     nvar   = 7 + (lmaxg + 1) + (lmaxgp + 1) + (lmaxr + 1) + nqmax * (lmaxnu + 1)
 
-    # ... set adiabatic ICs
+    # ... determine starting time
     tau_start = determine_starting_time( param=param, k=kmode )
-    # tau_start = 0.01 #jnp.minimum(param['tau_of_a_spline'](1e-6), jnp.minimum(0.1 * tauk, jnp.min(tau_out)/2))
+    tau_start = jnp.minimum( jnp.min(tau_out), tau_start )
+
+    # ... set adiabatic ICs
     y0 = adiabatic_ics_one_mode( tau=tau_start, param=param, kmode=kmode, nvar=nvar, 
                        lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax )
 
@@ -909,7 +930,8 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
 
     tauk = 1./kmode
     tau_neutrino_cfa = jnp.minimum(tauk * nu_fluid_trigger_tau_over_tau_k, 0.999*tau_max) # don't go to tau_max so that all modes are converted to massive neutrino approx
-    
+    tau_neutrino_cfa = tau_max
+
     # create list of saveat times for first and second part of evolution
     saveat1 = drx.SaveAt(ts= jnp.where(tau_out<tau_neutrino_cfa,tau_out,tau_neutrino_cfa) )
     saveat2 = drx.SaveAt(ts= jnp.where(tau_out>=tau_neutrino_cfa,tau_out,tau_neutrino_cfa) )
@@ -918,7 +940,7 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
     solver = drx.Kvaerno5()
     
     # create stepsize controller, we use a PID controller
-    stepsize_controller = drx.PIDController(rtol=rtol, atol=atol, pcoeff=0.4, icoeff=0.3, dcoeff=0)
+    stepsize_controller = drx.PIDController(rtol=rtol, atol=atol)#, pcoeff=0.4, icoeff=0.3, dcoeff=0)
     
     # solve before neutrinos become fluid
     sol1 = drx.diffeqsolve(
@@ -966,7 +988,7 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
 @partial(jax.jit, static_argnames=("num_k","lmaxg","lmaxgp", "lmaxr", "lmaxnu","nqmax","rtol","atol"))
 def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k : int, \
                          lmaxg : int = 12, lmaxgp : int = 12, lmaxr : int = 17, lmaxnu : int = 17, \
-                         nqmax : int = 15, rtol: float = 1e-3, atol: float = 1e-4 ):
+                         nqmax : int = 15, rtol: float = 1e-4, atol: float = 1e-7 ):
     """evolve cosmological perturbations in the synchronous gauge
 
     Parameters
