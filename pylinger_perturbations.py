@@ -6,15 +6,28 @@ from jaxopt import Bisection
 import diffrax as drx
 import equinox as eqx
 
-def compute_time_scales( *, k, a, param ):
+
+def compute_rho_p( a, param ):
     rhonu = param['rhonu_of_a_spline'].evaluate(a)
+    pnu = param['pnu_of_a_spline'].evaluate( a ) 
+    
 
     grho = (
         param['grhom'] * param['Omegam'] / a
         + (param['grhog'] + param['grhor'] * (param['Neff'] + param['Nmnu'] * rhonu)) / a**2
-        + param['grhom'] * param['OmegaL'] * a**2
+        + param['grhom'] * param['OmegaDE'] * a**2
         + param['grhom'] * param['Omegak']
     )
+
+    gpres = (
+        (param['grhog'] + param['grhor'] * param['Neff']) / 3.0 + param['grhor'] * param['Nmnu'] * pnu
+    ) / a**2 - param['grhom'] * param['OmegaDE'] * a**2
+
+    return grho, gpres
+
+def compute_time_scales( *, k, a, param ):
+    
+    grho,_ = compute_rho_p( a, param )
     aprimeoa = jnp.sqrt(grho / 3.0)
 
     # ... Thomson opacity coefficient = n_e sigma_T
@@ -129,19 +142,7 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
     pb43 = 4.0 / 3.0 * photbar
 
     # ... compute expansion rate
-    rhonu = rhonu_of_a_interp.evaluate(a) #param['rhonu_of_a_spline']( a )
-    pnu = pnu_of_a_interp.evaluate(a) #param['pnu_of_a_spline']( a ) 
-    
-    grho = (
-        param['grhom'] * param['Omegam'] / a
-        + (param['grhog'] + param['grhor'] * (param['Neff'] + param['Nmnu'] * rhonu)) / a**2
-        + param['grhom'] * param['OmegaL'] * a**2
-        + param['grhom'] * param['Omegak']
-    )
-
-    gpres = (
-        (param['grhog'] + param['grhor'] * param['Neff']) / 3.0 + param['grhor'] * param['Nmnu'] * pnu
-    ) / a**2 - param['grhom'] * param['OmegaL'] * a**2
+    grho, gpres = compute_rho_p( a, param )
 
     aprimeoa = jnp.sqrt(grho / 3.0)
     aprimeprimeoa = 0.5 * (aprimeoa**2 - gpres)
@@ -482,17 +483,8 @@ def model_synchronous_neutrino_cfa(*, tau, yin, param, kmode, lmaxg, lmaxgp, lma
     dpnu = cg2_nu * deltanu
     
     # ... compute expansion rate
-    grho = (
-        param['grhom'] * param['Omegam'] / a
-        + (param['grhog'] + param['grhor'] * (param['Neff'] + param['Nmnu'] * rhonu)) / a**2
-        + param['grhom'] * param['OmegaL'] * a**2
-        + param['grhom'] * param['Omegak']
-    )
-
-    gpres = (
-        (param['grhog'] + param['grhor'] * param['Neff']) / 3.0 + param['grhor'] * param['Nmnu'] * pnu
-    ) / a**2 - param['grhom'] * param['OmegaL'] * a**2
-
+    grho, gpres = compute_rho_p( a, param )
+    
     aprimeoa = jnp.sqrt(grho / 3.0)                 # Friedmann I
     aprimeprimeoa = 0.5 * (aprimeoa**2 - gpres)     # Friedmann II
 
@@ -747,17 +739,9 @@ def adiabatic_ics_one_mode( *, tau: float, param, kmode, nvar, lmaxg, lmaxgp, lm
     a = param['a_of_tau_spline'].evaluate(tau)
 
     rhonu = param['rhonu_of_a_spline'].evaluate(a)
-    pnu = param['pnu_of_a_spline'].evaluate(a)
-    
-    grho = (
-        param['grhom'] * param['Omegam'] / a
-        + (param['grhog'] + param['grhor'] * (param['Neff'] + param['Nmnu'] * rhonu)) / a**2
-        + param['grhom'] * param['OmegaL'] * a**2
-        + param['grhom'] * param['Omegak']
-    )
-    gpres = (
-        (param['grhog'] + param['grhor'] * param['Neff']) / 3.0 + param['grhor'] * param['Nmnu'] * pnu
-    ) / a**2 - param['grhom'] * param['OmegaL'] * a**2
+    # pnu = param['pnu_of_a_spline'].evaluate(a)
+
+    grho, gpres = compute_rho_p( a, param )
 
     s = grho + gpres
 
@@ -854,21 +838,17 @@ def determine_starting_time( *, param, k ):
         a = param['a_of_tau_spline'].evaluate( tau )
         opac = xe * akthom / a**2
 
-        rhonu = param['rhonu_of_a_spline'].evaluate( a )
-        aprimeoa = jnp.sqrt( (param['grhom'] * param['Omegam'] / a
-                        + (param['grhog'] + param['grhor'] * (param['Neff'] + param['Nmnu'] * rhonu)) / a**2
-                        + param['grhom'] * param['OmegaL'] * a**2
-                        + param['grhom'] * param['Omegak'])/3.0 )
+        grho, _ = compute_rho_p( a, param )
+
+        aprimeoa = jnp.sqrt( grho / 3.0 )
         return 1.0/opac, 1.0/aprimeoa
 
     def get_tauH( tau, param ):
         a = param['a_of_tau_spline'].evaluate( tau )
 
-        rhonu = param['rhonu_of_a_spline'].evaluate( a )
-        aprimeoa = jnp.sqrt( (param['grhom'] * param['Omegam'] / a
-                        + (param['grhog'] + param['grhor'] * (param['Neff'] + param['Nmnu'] * rhonu)) / a**2
-                        + param['grhom'] * param['OmegaL'] * a**2
-                        + param['grhom'] * param['Omegak'])/3.0 )
+        grho, _ = compute_rho_p( a, param )
+
+        aprimeoa = jnp.sqrt( grho / 3.0 )
         return 1.0/aprimeoa
 
     # condition for small k: tau_c(a) / tau_H(a) < start_small_k_at_tau_c_over_tau_h
@@ -987,7 +967,7 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
 @partial(jax.jit, static_argnames=("num_k","lmaxg","lmaxgp", "lmaxr", "lmaxnu","nqmax","rtol","atol"))
 def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k : int, \
                          lmaxg : int = 12, lmaxgp : int = 12, lmaxr : int = 17, lmaxnu : int = 17, \
-                         nqmax : int = 15, rtol: float = 1e-4, atol: float = 1e-7 ):
+                         nqmax : int = 15, rtol: float = 1e-3, atol: float = 1e-6 ):
     """evolve cosmological perturbations in the synchronous gauge
 
     Parameters

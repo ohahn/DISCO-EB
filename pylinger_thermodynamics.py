@@ -93,21 +93,21 @@ def ionHe(tempb: float, a: float, x0: float, x1: float, x2: float, YHe: float, H
 @partial(jax.jit, static_argnames=("nthermo",))
 def compute(*, param, nthermo: int):
     # Output: a, adot, tau, tb, xe_raw, xe, xHeI, xHeII, cs2
-    tau0   = param['taumin']
-    adot0  = param['adotrad']
-    Tcmb   = param['Tcmb'] 
-    YHe    = param['YHe']
-    taumin = param['taumin']
-    taumax = param['taumax']
-    grhom  = param['grhom']
-    grhog  = param['grhog']
-    grhor  = param['grhor']
-    Omegam = param['Omegam']
-    Omegab = param['Omegab']
-    OmegaL = param['OmegaL']
-    Neff   = param['Neff']
-    Nmnu   = param['Nmnu']
-    H0     = param['H0']
+    tau0    = param['taumin']
+    adot0   = param['adotrad']
+    Tcmb    = param['Tcmb'] 
+    YHe     = param['YHe']
+    taumin  = param['taumin']
+    taumax  = param['taumax']
+    grhom   = param['grhom']
+    grhog   = param['grhog']
+    grhor   = param['grhor']
+    Omegam  = param['Omegam']
+    Omegab  = param['Omegab']
+    OmegaDE = param['OmegaDE']
+    Neff    = param['Neff']
+    Nmnu    = param['Nmnu']
+    H0      = param['H0']
     rhonu_sp  = param['rhonu_of_a_spline']
 
 
@@ -144,8 +144,8 @@ def compute(*, param, nthermo: int):
         grho = (
             grhom * Omegam / new_a
             + (grhog + grhor * (Neff + Nmnu * rhonu)) / new_a**2
-            + grhom * OmegaL * new_a**2
-            + grhom * (1-Omegam-OmegaL) * new_a
+            + grhom * OmegaDE * new_a**2
+            + grhom * (1-Omegam-OmegaDE)
         )
         new_adot = jnp.sqrt(grho / 3.0) * new_a
 
