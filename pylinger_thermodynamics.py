@@ -105,6 +105,8 @@ def compute(*, param, nthermo: int):
     Omegam  = param['Omegam']
     Omegab  = param['Omegab']
     OmegaDE = param['OmegaDE']
+    w_DE_0  = param['w_DE_0']
+    w_DE_a  = param['w_DE_a']
     Neff    = param['Neff']
     Nmnu    = param['Nmnu']
     H0      = param['H0']
@@ -141,10 +143,12 @@ def compute(*, param, nthermo: int):
         new_a = a + adot * dtau
 
         rhonu = rhonu_sp.evaluate( new_a )
+        rhoDE = a**(-3*(1+w_DE_0+w_DE_a)) * jnp.exp(3*(a-1)*w_DE_a)
+    
         grho = (
             grhom * Omegam / new_a
             + (grhog + grhor * (Neff + Nmnu * rhonu)) / new_a**2
-            + grhom * OmegaDE * new_a**2
+            + grhom * OmegaDE * rhoDE * new_a**2
             + grhom * (1-Omegam-OmegaDE)
         )
         new_adot = jnp.sqrt(grho / 3.0) * new_a

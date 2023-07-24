@@ -11,17 +11,19 @@ def compute_rho_p( a, param ):
     rhonu = param['rhonu_of_a_spline'].evaluate(a)
     pnu = param['pnu_of_a_spline'].evaluate( a ) 
     
+    rhoDE = a**(-3*(1+param['w_DE_0']+param['w_DE_a'])) * jnp.exp(3*(a-1)*param['w_DE_a'])
+    wDE = param['w_DE_0'] + param['w_DE_a'] * (1-a)
 
     grho = (
         param['grhom'] * param['Omegam'] / a
         + (param['grhog'] + param['grhor'] * (param['Neff'] + param['Nmnu'] * rhonu)) / a**2
-        + param['grhom'] * param['OmegaDE'] * a**2
+        + param['grhom'] * param['OmegaDE'] * rhoDE * a**2
         + param['grhom'] * param['Omegak']
     )
 
     gpres = (
         (param['grhog'] + param['grhor'] * param['Neff']) / 3.0 + param['grhor'] * param['Nmnu'] * pnu
-    ) / a**2 - param['grhom'] * param['OmegaDE'] * a**2
+    ) / a**2 + wDE * param['grhom'] * param['OmegaDE'] * rhoDE * a**2
 
     return grho, gpres
 

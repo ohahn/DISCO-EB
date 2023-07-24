@@ -107,11 +107,12 @@ def nu_perturb( a : float, amnu: float, psi0, psi1, psi2, nq : int = 1000, qmax 
 
 # @partial(jax.jit, static_argnames=("params",))
 @jax.jit
-def dtauda_(a, grhom, grhog, grhor, Omegam, OmegaDE, Omegak, Neff, Nmnu, rhonu_spline):
+def dtauda_(a, grhom, grhog, grhor, Omegam, OmegaDE, w_DE_0, w_DE_a, Omegak, Neff, Nmnu, rhonu_spline):
     """Derivative of conformal time with respect to scale factor"""
+    rho_DE = a**(-3*(1+w_DE_0+w_DE_a)) * jnp.exp(3*(a-1)*w_DE_a)
     grho2 = grhom * Omegam * a \
         + (grhog + grhor*(Neff+Nmnu*rhonu_spline.evaluate(a))) \
-        + grhom * OmegaDE * a**4 \
+        + grhom * OmegaDE * rho_DE * a**4 \
         + grhom * Omegak * a**2
     return jnp.sqrt(3.0 / grho2)
 
@@ -150,7 +151,8 @@ def evolve_background( *, param, rtol: float = 1e-5, atol: float = 1e-7, order: 
     param['ppseudonu_of_a_spline'] = drx.CubicInterpolation( ts=a, coeffs=ppnu_coeff )
     param['taumin'] = amin / param['adotrad']
     param['taumax'] = param['taumin'] + romb( lambda a_: dtauda_(a_,param['grhom'], param['grhog'], param['grhor'], 
-                                                                 param['Omegam'], param['OmegaDE'], param['Omegak'], param['Neff'], param['Nmnu'], 
+                                                                 param['Omegam'], param['OmegaDE'], param['w_DE_0'], param['w_DE_a'],
+                                                                 param['Omegak'], param['Neff'], param['Nmnu'], 
                                                                  param['rhonu_of_a_spline']), amin, amax )
 
 
