@@ -17,8 +17,8 @@ from pylinger_perturbations import evolve_one_mode, evolve_perturbations
 ## Cosmological Parameters
 Tcmb    = 2.7255
 YHe     = 0.248
-Omegam  = 0.276
-Omegab  = 0.0455
+Omegam  = 0.3099
+Omegab  = 0.0488911
 # OmegaDE = 1.0-Omegam
 w_DE_0  = -1.0
 w_DE_a  = 0.0
@@ -27,9 +27,13 @@ num_massive_neutrinos = 1
 mnu     = 0.06 #0.06 #eV
 Neff    = 2.046 # -1 if massive neutrino present
 standard_neutrino_neff=Neff+num_massive_neutrinos
-H0      = 70.3
-A_s     = 2.1e-9
-n_s     = 0.965
+H0      = 67.742
+A_s     = 2.1064e-09
+n_s     = 0.96822
+
+
+fieldnames = ['$\\Omega_m$', '$\\Omega_b$', '$A_s$', '$n_s$', '$H_0$', '$T_{CMB}$', '$Y_{He}$', '$N_{eff}$', '$m_{\\nu}$', '$w_0$', '$w_a$', '$c_s^2$']
+fiducial_cosmo_param = jnp.array([Omegam, Omegab, A_s, n_s, H0, Tcmb, YHe, Neff, mnu, w_DE_0, w_DE_a, cs2_DE])
 
 
 
@@ -40,8 +44,8 @@ def f_of_Omegam( args ):
     param['Omegab'] = args[1]
     param['OmegaDE'] = 1-args[0]
     param['Omegak'] = 0.0
-    param['A_s'] = args[2]
-    param['n_s'] = args[3]
+    A_s = args[2]
+    n_s = args[3]
     param['H0'] = args[4]
     param['Tcmb'] = args[5]
     param['YHe'] = args[6]
@@ -79,17 +83,16 @@ def f_of_Omegam( args ):
 
     iout = -1
     fac = 2.5
-    Pkc = fac * param['A_s']*(kmodes/k_p)**(param['n_s'] - 1) * kmodes**(-3) * y[:,iout,3]**2 
-    Pkb = fac * param['A_s']*(kmodes/k_p)**(param['n_s'] - 1) * kmodes**(-3) * y[:,iout,5]**2 
+    Pkc = fac * A_s*(kmodes/k_p)**(n_s - 1) * kmodes**(-3) * y[:,iout,3]**2 
+    Pkb = fac * A_s*(kmodes/k_p)**(n_s - 1) * kmodes**(-3) * y[:,iout,5]**2 
     Pkm = (param['Omegam']-param['Omegab']) * Pkc + param['Omegab'] * Pkb
     
-    return jnp.array([Pkc, Pkb, Pkm])
+    return Pkm
 
 
-k  = jnp.geomspace(1e-3,1e1,128)
-dy = jax.jacfwd(f_of_Omegam)(jnp.array([Omegam, Omegab, A_s, n_s, H0, Tcmb, YHe, Neff, mnu, w_DE_0, w_DE_a, cs2_DE]))
-
-fieldnames = ['$\\Omega_m$', '$\\Omega_b$', '$A_s$', '$n_s$', '$h$', '$T_{CMB}$', '$Y_{He}$', '$N_{eff}$', '$m_{\\nu}$', '$w_0$', '$w_a$', '$c_s^2$']
+## compute the jacobian at few times, but for many k
+k  = jnp.geomspace(1e-2,1e1,128)
+dy = jax.jacfwd(f_of_Omegam)(fiducial_cosmo_param)
 
 fig,ax = plt.subplots(3,4,sharex=True,layout='constrained')
 
