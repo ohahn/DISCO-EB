@@ -392,10 +392,10 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
 
     # ---- Quintessence equations of motion -----------------------------------------------------------
     # ... Ballesteros & Lesgourgues (2010, BL10), arXiv:1004.5509
-    f = f.at[iq4+0].set( # BL10, eq. (3.5)
+    f = f.at[-2].set( # BL10, eq. (3.5)
         -(1+w_Q) *(thetaq + 0.5 * hprime) - 3*(cs2_Q - w_Q) * aprimeoa * deltaq - 9*(1+w_Q)*(cs2_Q-ca2_Q)*aprimeoa**2/kmode**2 * thetaq
     )
-    f = f.at[iq4+1].set( # BL10, eq. (3.6)
+    f = f.at[-1].set( # BL10, eq. (3.6)
         -(1-3*cs2_Q)*aprimeoa*thetaq + cs2_Q/(1+w_Q) * kmode**2 * deltaq
     )
 
@@ -737,10 +737,10 @@ def model_synchronous_neutrino_cfa(*, tau, yin, param, kmode, lmaxg, lmaxgp, lma
 
     # ---- Quintessence equations of motion -----------------------------------------------------------
     # ... Ballesteros & Lesgourgues (2010, BL10), arXiv:1004.5509
-    f = f.at[iq0+3].set( # BL10, eq. (3.5)
+    f = f.at[-2].set( # BL10, eq. (3.5)
         -(1+w_Q) *(thetaq + 0.5 * hprime) - 3*(cs2_Q - w_Q) * aprimeoa * deltaq - 9*(1+w_Q)*(cs2_Q-ca2_Q)*aprimeoa**2/kmode**2 * thetaq
     )
-    f = f.at[iq0+4].set( # BL10, eq. (3.6)
+    f = f.at[-1].set( # BL10, eq. (3.6)
         -(1-3*cs2_Q)*aprimeoa*thetaq + cs2_Q/(1+w_Q) * kmode**2 * deltaq
     )
 
@@ -872,8 +872,8 @@ def adiabatic_ics_one_mode( *, tau: float, param, kmode, nvar, lmaxg, lmaxgp, lm
     deltaq = -akt2 / 4 * (1+w_Q)*(4-3*cs2_Q)/(4-6*w_Q+3*cs2_Q) * psi * s2_squared # BL10 eq. 3.7
     thetaq = -akt2**2 / tau / 4 * cs2_Q/(4-6*w_Q+3*cs2_Q) * psi * s2_squared      # BL10 eq. 3.8
 
-    y = y.at[iq4+0].set( deltaq )
-    y = y.at[iq4+1].set( thetaq )
+    y = y.at[-2].set( deltaq )
+    y = y.at[-1].set( thetaq )
     
     return y
 
