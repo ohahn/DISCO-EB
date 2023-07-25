@@ -6,7 +6,7 @@ from jaxopt import Bisection
 import diffrax as drx
 import equinox as eqx
 
-
+@partial(jax.jit, inline=True)
 def compute_rho_p( a, param ):
     rhonu = param['rhonu_of_a_spline'].evaluate(a)
     pnu = param['pnu_of_a_spline'].evaluate( a ) 
@@ -1030,7 +1030,7 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
     return jnp.where( tau_out[:,None]<tau_neutrino_cfa, y1_converted, sol2.ys )
 
 
-#@partial(jax.jit, static_argnames=("num_k","lmaxg","lmaxgp", "lmaxr", "lmaxnu","nqmax","rtol","atol"))
+@partial(jax.jit, static_argnames=("num_k","lmaxg","lmaxgp", "lmaxr", "lmaxnu","nqmax","rtol","atol"))
 def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k : int, \
                          lmaxg : int = 12, lmaxgp : int = 12, lmaxr : int = 17, lmaxnu : int = 17, \
                          nqmax : int = 15, rtol: float = 1e-3, atol: float = 1e-6 ):
