@@ -2,7 +2,7 @@ import jax
 # jax.config.update("jax_enable_x64", True)
 # jax.config.update('jax_platform_name', 'cpu')
 # jax.config.update("jax_debug_nans", True)
-# jax.config.update("jax_disable_jit", True)
+#jax.config.update("jax_disable_jit", True)
 import numpy as np
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
@@ -72,8 +72,8 @@ LambdaCDM.set({
     'l_max_ur' : 50,
     'l_max_ncdm' : 50,
     'Omega_Lambda' : 0.0,
-    'w0_fld' : -1.0, #w_DE_0,
-    'wa_fld' : 0.0, #w_DE_a,
+    'w0_fld' : w_DE_0,
+    'wa_fld' : w_DE_a,
   })
 # run class
 print('Computing CLASS solution...')
