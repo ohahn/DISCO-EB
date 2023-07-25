@@ -150,8 +150,8 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
     # ... compute expansion rate
     grho, gpres = compute_rho_p( a, param )
 
-    aprimeoa = jnp.sqrt(grho / 3.0)
-    aprimeprimeoa = 0.5 * (aprimeoa**2 - gpres)
+    aprimeoa = jnp.sqrt(grho / 3.0)                # Friedmann I
+    aprimeprimeoa = 0.5 * (aprimeoa**2 - gpres)    # Friedmann II
 
     # ... Thomson opacity coefficient
     akthom = 2.3048e-9 * (1.0 - param['YHe']) * param['Omegab'] * param['H0']**2
@@ -166,7 +166,7 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
     # ... quintessence
     cs2_Q     = 1.0
     w_Q       = param['w_DE_0'] + param['w_DE_a'] * (1.0 - a)
-    w_Q_prime = - param['w_DE_a']
+    w_Q_prime = - param['w_DE_a'] * aprimeoa * a
     ca2_Q     = w_Q - w_Q_prime / 3 / (1+w_Q) / aprimeoa
     rhoDE     = a**(-3*(1+param['w_DE_0']+param['w_DE_a'])) * jnp.exp(3*(a-1)*param['w_DE_a'])
     rho_plus_p_theta_Q = (1+w_Q) * rhoDE * param['grhom'] * param['OmegaDE'] * thetaq * a**2
@@ -530,7 +530,7 @@ def model_synchronous_neutrino_cfa(*, tau, yin, param, kmode, lmaxg, lmaxgp, lma
     # ... quintessence
     cs2_Q     = 1.0
     w_Q       = param['w_DE_0'] + param['w_DE_a'] * (1.0 - a)
-    w_Q_prime = - param['w_DE_a']
+    w_Q_prime = - param['w_DE_a'] * aprimeoa * a
     ca2_Q     = w_Q - w_Q_prime / 3 / (1+w_Q) / aprimeoa
     rhoDE     = a**(-3*(1+param['w_DE_0']+param['w_DE_a'])) * jnp.exp(3*(a-1)*param['w_DE_a'])
     rho_plus_p_theta_Q = (1+w_Q) * rhoDE * param['grhom'] * param['OmegaDE'] * thetaq * a**2
@@ -556,7 +556,10 @@ def model_synchronous_neutrino_cfa(*, tau, yin, param, kmode, lmaxg, lmaxgp, lma
         + param['Nmnu'] * param['grhor'] * rho_plus_p_nu * thetanu / a**2
         + rho_plus_p_theta_Q
     )
-
+    dgshear = (
+        4.0 / 3.0 * (param['grhog'] * shearg + param['Neff'] * param['grhor'] * shearr) / a**2
+        + param['Nmnu'] * param['grhor'] * rho_plus_p_nu * shearnu / a**2
+    )
 
     dahprimedtau = -(dgrho + 3.0 * dgpres) * a
     
@@ -568,11 +571,6 @@ def model_synchronous_neutrino_cfa(*, tau, yin, param, kmode, lmaxg, lmaxgp, lma
     alpha  = (hprime + 6.*etaprime)/2./kmode**2
     f = f.at[2].set( etaprime )
 
-    dgshear = (
-        4.0 / 3.0 * (param['grhog'] * shearg + param['Neff'] * param['grhor'] * shearr) / a**2
-        + param['Nmnu'] * param['grhor'] * rho_plus_p_nu * shearnu / a**2
-    )
-    
     alphaprime = -3*dgshear/(2*kmode**2) + eta - 2*aprimeoa*alpha
     alphaprime -=  9/2 * a**2/kmode**2 * 4/3*16/45/opac * (thetag+kmode**2*alpha) * param['grhog']
 
