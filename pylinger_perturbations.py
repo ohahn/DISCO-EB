@@ -164,7 +164,7 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
     Fprime  = taucprime/(1+pb43) + tauc*pb43*aprimeoa/(1+pb43)**2 #CLASS perturbations.c:10074
 
     # ... quintessence
-    cs2_Q     = 1.0
+    cs2_Q     = param['cs2_DE']
     w_Q       = param['w_DE_0'] + param['w_DE_a'] * (1.0 - a)
     w_Q_prime = - param['w_DE_a'] * aprimeoa * a
     ca2_Q     = w_Q - w_Q_prime / 3 / ((1+w_Q)+1e-6) / aprimeoa
