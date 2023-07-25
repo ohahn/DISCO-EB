@@ -22,6 +22,7 @@ Omegab  = 0.0455
 OmegaDE = 1.0-Omegam
 w_DE_0  = -0.9
 w_DE_a  = 0.0
+cs2_DE  = 1.0
 num_massive_neutrinos = 1
 mnu     = 0.06 #0.06 #eV
 Neff    = 2.046 # -1 if massive neutrino present
@@ -74,6 +75,7 @@ LambdaCDM.set({
     'Omega_Lambda' : 0.0,
     'w0_fld' : w_DE_0,
     'wa_fld' : w_DE_a,
+    'cs2_fld' : 1.0,
   })
 # run class
 print('Computing CLASS solution...')
@@ -89,27 +91,27 @@ def get_class_power( fieldname, zout ):
 
 ## Compute Background evolution
 param = {}
-param['Omegam'] = Omegam
-param['Omegab'] = Omegab
+param['Omegam']  = Omegam
+param['Omegab']  = Omegab
 param['OmegaDE'] = OmegaDE
-param['w_DE_0'] = w_DE_0
-param['w_DE_a'] = w_DE_a
-param['Omegak'] = 0.0
-param['A_s'] = A_s
-param['n_s'] = n_s
-param['H0'] = 100*h
-param['Tcmb'] = Tcmb
-param['YHe'] = YHe
-param['Neff'] = Neff
-param['Nmnu'] = num_massive_neutrinos
-param['mnu'] = mnu
+param['w_DE_0']  = w_DE_0
+param['w_DE_a']  = w_DE_a
+param['cs2_DE']  = cs2_DE
+param['Omegak']  = 0.0
+param['A_s']     = A_s
+param['n_s']     = n_s
+param['H0']      = 100*h
+param['Tcmb']    = Tcmb
+param['YHe']     = YHe
+param['Neff']    = Neff
+param['Nmnu']    = num_massive_neutrinos
+param['mnu']     = mnu
 
 for p in param:
   print(f'{p} = {param[p]}')
 
 print('Computing pyLinger background solution...')
 param = evolve_background(param=param)
-
 
 # Compute Perturbations
 nmodes = 128

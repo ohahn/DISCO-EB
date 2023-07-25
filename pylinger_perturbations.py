@@ -528,10 +528,10 @@ def model_synchronous_neutrino_cfa(*, tau, yin, param, kmode, lmaxg, lmaxgp, lma
     Fprime  = taucprime/(1+pb43) + tauc*pb43*aprimeoa/(1+pb43)**2 #CLASS perturbations.c:10074
 
     # ... quintessence
-    cs2_Q     = 1.0
+    cs2_Q     = param['cs2_DE']
     w_Q       = param['w_DE_0'] + param['w_DE_a'] * (1.0 - a)
     w_Q_prime = - param['w_DE_a'] * aprimeoa * a
-    ca2_Q     = w_Q - w_Q_prime / 3 / (1+w_Q) / aprimeoa
+    ca2_Q     = w_Q - w_Q_prime / 3 / ((1+w_Q)+1e-6) / aprimeoa
     rhoDE     = a**(-3*(1+param['w_DE_0']+param['w_DE_a'])) * jnp.exp(3*(a-1)*param['w_DE_a'])
     rho_plus_p_theta_Q = (1+w_Q) * rhoDE * param['grhom'] * param['OmegaDE'] * thetaq * a**2
 
@@ -867,7 +867,7 @@ def adiabatic_ics_one_mode( *, tau: float, param, kmode, nvar, lmaxg, lmaxgp, lm
     # higher moments are zero at the initial time
 
     # ... quintessence, Ballesteros & Lesgourgues (2010, BL20), arXiv:1004.5509
-    cs2_Q  = 1.0
+    cs2_Q  = param['cs2_DE']
     w_Q    = param['w_DE_0'] + param['w_DE_a'] * (1.0 - a)
     deltaq = -akt2 / 4 * (1+w_Q)*(4-3*cs2_Q)/(4-6*w_Q+3*cs2_Q) * psi * s2_squared # BL10 eq. 3.7
     thetaq = -akt2**2 / tau / 4 * cs2_Q/(4-6*w_Q+3*cs2_Q) * psi * s2_squared      # BL10 eq. 3.8
