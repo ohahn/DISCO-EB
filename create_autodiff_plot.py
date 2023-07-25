@@ -4,7 +4,6 @@ import jax.numpy as jnp
 import equinox as eqx
 import diffrax
 import matplotlib.pyplot as plt
-%matplotlib widget
 
 jax.config.update("jax_enable_x64", True)
 # jax.config.update('jax_platform_name', 'cpu')
@@ -20,7 +19,7 @@ Tcmb    = 2.7255
 YHe     = 0.248
 Omegam  = 0.276
 Omegab  = 0.0455
-OmegaDE = 1.0-Omegam
+# OmegaDE = 1.0-Omegam
 w_DE_0  = -1.0
 w_DE_a  = 0.0
 cs2_DE  = 1.0
@@ -28,14 +27,14 @@ num_massive_neutrinos = 1
 mnu     = 0.06 #0.06 #eV
 Neff    = 2.046 # -1 if massive neutrino present
 standard_neutrino_neff=Neff+num_massive_neutrinos
-h       = 0.703
+H0      = 70.3
 A_s     = 2.1e-9
 n_s     = 0.965
-k_p     = 0.05
+
 
 
 # @eqx.filter_jit
-def f_of_Omegam( args, k_p ):
+def f_of_Omegam( args ):
     param = {}
     param['Omegam'] = args[0]
     param['Omegab'] = args[1]
@@ -52,6 +51,8 @@ def f_of_Omegam( args, k_p ):
     param['w_DE_0'] = args[9]
     param['w_DE_a'] = args[10]
     param['cs2_DE'] = args[11]
+
+    k_p  = 0.05
 
     param = evolve_background(param=param)
     
@@ -86,7 +87,7 @@ def f_of_Omegam( args, k_p ):
 
 
 k  = jnp.geomspace(1e-3,1e1,128)
-dy = jax.jacfwd(f_of_Omegam)([Omegam, Omegab, A_s, n_s, h, Tcmb, YHe, Neff, mnu, w_DE_0, w_DE_a, cs2_DE], k_p)
+dy = jax.jacfwd(f_of_Omegam)(jnp.array([Omegam, Omegab, A_s, n_s, H0, Tcmb, YHe, Neff, mnu, w_DE_0, w_DE_a, cs2_DE]))
 
 fieldnames = ['$\\Omega_m$', '$\\Omega_b$', '$A_s$', '$n_s$', '$h$', '$T_{CMB}$', '$Y_{He}$', '$N_{eff}$', '$m_{\\nu}$', '$w_0$', '$w_a$', '$c_s^2$']
 
