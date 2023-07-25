@@ -897,7 +897,7 @@ def determine_starting_time( *, param, k ):
 
     tau_k = 1.0/k
 
-    def get_tauc_tauH( tau ):
+    def get_tauc_tauH( tau, param ):
         xe = param['xe_of_tau_spline'].evaluate( tau )
         a = param['a_of_tau_spline'].evaluate( tau )
         opac = xe * akthom / a**2
@@ -907,7 +907,7 @@ def determine_starting_time( *, param, k ):
         aprimeoa = jnp.sqrt( grho / 3.0 )
         return 1.0/opac, 1.0/aprimeoa
 
-    def get_tauH( tau ):
+    def get_tauH( tau, param ):
         a = param['a_of_tau_spline'].evaluate( tau )
 
         grho, _ = compute_rho_p( a, param )
@@ -916,18 +916,18 @@ def determine_starting_time( *, param, k ):
         return 1.0/aprimeoa
 
     # condition for small k: tau_c(a) / tau_H(a) < start_small_k_at_tau_c_over_tau_h
-    def cond_small_k( logtau ):
-        tau_c, tau_H = get_tauc_tauH( jnp.exp(logtau) )
+    def cond_small_k( logtau, param ):
+        tau_c, tau_H = get_tauc_tauH( jnp.exp(logtau), param )
         return tau_c/tau_H/start_small_k_at_tau_c_over_tau_h - 1.0
 
     # condition for large k: tau_H(a) / tau_k < start_large_k_at_tau_k_over_tau_h
-    def cond_large_k( logtau ):
-        tau_H = get_tauH( jnp.exp(logtau) )
+    def cond_large_k( logtau, param ):
+        tau_H = get_tauH( jnp.exp(logtau), param )
         return tau_H/tau_k/start_large_k_at_tau_h_over_tau_k - 1.0
 
     
-    logtau_small_k =  Bisection(optimality_fun=lambda lt : cond_small_k(lt), lower=jnp.log(tau0), upper=jnp.log(tau1), maxiter=8, check_bracket=False).run().params
-    logtau_large_k =  Bisection(optimality_fun=lambda lt : cond_large_k(lt), lower=jnp.log(tau0), upper=jnp.log(tau1), maxiter=8, check_bracket=False).run().params
+    logtau_small_k =  Bisection(optimality_fun=cond_small_k, lower=jnp.log(tau0), upper=jnp.log(tau1), maxiter=8, check_bracket=False).run(param=param).params
+    logtau_large_k =  Bisection(optimality_fun=cond_large_k, lower=jnp.log(tau0), upper=jnp.log(tau1), maxiter=8, check_bracket=False).run(param=param).params
 
     return jnp.exp(jnp.minimum(logtau_small_k, logtau_large_k))
 
