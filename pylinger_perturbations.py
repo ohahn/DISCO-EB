@@ -133,6 +133,10 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
     thetar = y[10 + lmaxg + lmaxgp]
     shearr = y[11 + lmaxg + lmaxgp] / 2.0
 
+    # ... quintessence field
+    deltaq = y[iq4+0]
+    thetaq = y[iq4+1]
+
     # ... evaluate thermodynamics
     tempb = tempb_of_tau_interp.evaluate(tau) #param['tempb_of_tau_spline']( tau )
     cs2 = cs2_of_tau_interp.evaluate(tau) #param['cs2_of_tau_spline']( tau )
@@ -157,8 +161,15 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
     tauc    = 1. / opac
     taucprime = tauc * (2*aprimeoa - xeprime/xe)
     F       = tauc / (1+pb43) #CLASS perturbations.c:10072
-    Fprime    = taucprime/(1+pb43) + tauc*pb43*aprimeoa/(1+pb43)**2 #CLASS perturbations.c:10074
+    Fprime  = taucprime/(1+pb43) + tauc*pb43*aprimeoa/(1+pb43)**2 #CLASS perturbations.c:10074
 
+    # ... quintessence
+    cs2_Q     = 1.0
+    w_Q       = param['w_DE_0'] + param['w_DE_a'] * (1.0 - a)
+    w_Q_prime = - param['w_DE_a']
+    ca2_Q     = w_Q - w_Q_prime / 3 / (1+w_Q / aprimeoa)
+    rhoDE     = a**(-3*(1+param['w_DE_0']+param['w_DE_a'])) * jnp.exp(3*(a-1)*param['w_DE_a'])
+    rho_plus_p_theta_Q = (1+w_Q) * rhoDE * param['grhom'] * param['OmegaDE'] * thetaq * a**2
 
     # ... background scale factor evolution
     f = f.at[0].set( aprimeoa * a )
@@ -169,10 +180,19 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
     dgrho = (
         param['grhom'] * (Omegac * deltac + param['Omegab'] * deltab) / a
         + (param['grhog'] * deltag + param['grhor'] * (param['Neff'] * deltar + param['Nmnu'] * drhonu)) / a**2
+        + param['grhom'] * param['OmegaDE'] * deltaq * rhoDE * a**2
     )
     dgpres = (
-        param['grhog'] * deltag + param['grhor'] * param['Neff'] * deltar
-    ) / a**2 / 3.0 + param['grhor'] * param['Nmnu'] * dpnu / a**2
+        (param['grhog'] * deltag + param['grhor'] * param['Neff'] * deltar) / a**2 / 3.0 
+        + param['grhor'] * param['Nmnu'] * dpnu / a**2 
+        + (cs2_Q * param['grhom'] * param['OmegaDE'] * deltaq * rhoDE * a**2 + (cs2_Q-ca2_Q)*(3*aprimeoa * rho_plus_p_theta_Q / kmode**2))
+    )
+    dgtheta = (
+        param['grhom'] * (Omegac * thetac + param['Omegab'] * thetab) / a
+        + 4.0 / 3.0 * (param['grhog'] * thetag + param['Neff'] * param['grhor'] * thetar) / a**2
+        + param['Nmnu'] * param['grhor'] * kmode * fnu / a**2
+        + rho_plus_p_theta_Q
+    )
 
     dahprimedtau = -(dgrho + 3.0 * dgpres) * a
     
@@ -181,11 +201,6 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
     # ... force energy conservation
     hprime = (2.0 * kmode**2 * eta + dgrho) / aprimeoa
 
-    dgtheta = (
-        param['grhom'] * (Omegac * thetac + param['Omegab'] * thetab) / a
-        + 4.0 / 3.0 * (param['grhog'] * thetag + param['Neff'] * param['grhor'] * thetar) / a**2
-        + param['Nmnu'] * param['grhor'] * kmode * fnu / a**2
-    )
     etaprime = 0.5 * dgtheta / kmode**2
     alpha  = (hprime + 6.*etaprime)/2./kmode**2
     f = f.at[2].set( etaprime )
@@ -376,6 +391,14 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
         kmode * v * y[-2 * nqmax : -nqmax] - (lmaxnu + 1) / tau * y[-nqmax :]
     )
 
+     # ---- Quintessence equations of motion -----------------------------------------------------------
+    f = f.at[iq4+0].set(
+        -(1+w_Q) *(thetaq + 0.5 * hprime) - 3*(cs2_Q - w_Q) * aprimeoa * deltaq - 9*(1+w_Q)*(cs2_Q-ca2_Q)*aprimeoa**2/kmode**2 * thetaq
+    )
+    f = f.at[iq4+1].set(
+        -(1-3*cs2_Q)*aprimeoa*thetaq + cs2_Q/(1+w_Q) * kmode**2 * deltaq
+    )
+
     return f.flatten()
 
 @partial(jax.jit, static_argnames=('lmaxg', 'lmaxgp', 'lmaxr'))
@@ -460,6 +483,10 @@ def model_synchronous_neutrino_cfa(*, tau, yin, param, kmode, lmaxg, lmaxgp, lma
     thetanu = y[iq0+1]
     shearnu = y[iq0+2]
 
+    # ... quintessence field
+    deltaq = y[iq0+3]
+    thetaq = y[iq0+4]
+
     # ... evaluate thermodynamics
     tempb = param['tempb_of_tau_spline'].evaluate( tau )
     cs2 = param['cs2_of_tau_spline'].evaluate( tau )
@@ -500,18 +527,36 @@ def model_synchronous_neutrino_cfa(*, tau, yin, param, kmode, lmaxg, lmaxgp, lma
     F       = tauc / (1+pb43) #CLASS perturbations.c:10072
     Fprime  = taucprime/(1+pb43) + tauc*pb43*aprimeoa/(1+pb43)**2 #CLASS perturbations.c:10074
 
+    # ... quintessence
+    cs2_Q     = 1.0
+    w_Q       = param['w_DE_0'] + param['w_DE_a'] * (1.0 - a)
+    w_Q_prime = - param['w_DE_a']
+    ca2_Q     = w_Q - w_Q_prime / 3 / (1+w_Q / aprimeoa)
+    rhoDE     = a**(-3*(1+param['w_DE_0']+param['w_DE_a'])) * jnp.exp(3*(a-1)*param['w_DE_a'])
+    rho_plus_p_theta_Q = (1+w_Q) * rhoDE * param['grhom'] * param['OmegaDE'] * thetaq * a**2
+
 
     # ... background scale factor evolution
     f = f.at[0].set( aprimeoa * a )
     
-    
+    # ... evaluate metric perturbations
     dgrho = (
         param['grhom'] * (Omegac * deltac + param['Omegab'] * deltab) / a
         + (param['grhog'] * deltag + param['grhor'] * (param['Neff'] * deltar + param['Nmnu'] * rhonu * deltanu)) / a**2
+        + param['grhom'] * param['OmegaDE'] * deltaq * rhoDE * a**2
     )
     dgpres = (
-        param['grhog'] * deltag + param['grhor'] * param['Neff'] * deltar
-    ) / a**2 / 3.0 + param['grhor'] * param['Nmnu'] * dpnu / a**2
+        (param['grhog'] * deltag + param['grhor'] * param['Neff'] * deltar) / a**2 / 3.0 
+        + param['grhor'] * param['Nmnu'] * dpnu / a**2 
+        + (cs2_Q * param['grhom'] * param['OmegaDE'] * deltaq * rhoDE * a**2 + (cs2_Q-ca2_Q)*(3*aprimeoa * rho_plus_p_theta_Q / kmode**2))
+    )
+    dgtheta = (
+        param['grhom'] * (Omegac * thetac + param['Omegab'] * thetab) / a
+        + 4.0 / 3.0 * (param['grhog'] * thetag + param['Neff'] * param['grhor'] * thetar) / a**2
+        + param['Nmnu'] * param['grhor'] * rho_plus_p_nu * thetanu / a**2
+        + rho_plus_p_theta_Q
+    )
+
 
     dahprimedtau = -(dgrho + 3.0 * dgpres) * a
     
@@ -519,12 +564,6 @@ def model_synchronous_neutrino_cfa(*, tau, yin, param, kmode, lmaxg, lmaxgp, lma
 
     # ... force energy conservation
     hprime = (2.0 * kmode**2 * eta + dgrho) / aprimeoa
-
-    dgtheta = (
-        param['grhom'] * (Omegac * thetac + param['Omegab'] * thetab) / a
-        + 4.0 / 3.0 * (param['grhog'] * thetag + param['Neff'] * param['grhor'] * thetar) / a**2
-        + param['Nmnu'] * param['grhor'] * rho_plus_p_nu * thetanu / a**2
-    )
     etaprime = 0.5 * dgtheta / kmode**2
     alpha  = (hprime + 6.*etaprime)/2./kmode**2
     f = f.at[2].set( etaprime )
@@ -698,6 +737,14 @@ def model_synchronous_neutrino_cfa(*, tau, yin, param, kmode, lmaxg, lmaxgp, lma
         + 8/3 * cvis2_nu/(1+w_nu) * s_l2 * (thetanu + 0.5*hprime)
     f = f.at[iq0+2].set( sigmanuprime )
 
+    # ---- Quintessence equations of motion -----------------------------------------------------------
+    f = f.at[iq0+3].set(
+        -(1+w_Q) *(thetaq + 0.5 * hprime) - 3*(cs2_Q - w_Q) * aprimeoa * deltaq - 9*(1+w_Q)*(cs2_Q-ca2_Q)*aprimeoa**2/kmode**2 * thetaq
+    )
+    f = f.at[iq0+4].set(
+        -(1-3*cs2_Q)*aprimeoa*thetaq + cs2_Q/(1+w_Q) * kmode**2 * deltaq
+    )
+
     return f.flatten()
 
 
@@ -718,11 +765,16 @@ def neutrino_convert_to_fluid(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, l
     pnu = param['pnu_of_a_spline'].evaluate( a ) 
     rho_plus_p = rhonu + pnu
     
+    # copy over all the other variables
     y = y.at[:iq0].set( yin[:iq0] )
 
+    # convert massive neutrinos
     y = y.at[iq0+0].set( drhonu / rhonu)
     y = y.at[iq0+1].set( kmode * fnu / rho_plus_p)
     y = y.at[iq0+2].set( shearnu / rho_plus_p )
+
+    # copy quintessence
+    y = y.at[-2:].set( yin[-2:] )
     
     return y
 
@@ -756,12 +808,15 @@ def adiabatic_ics_one_mode( *, tau: float, param, kmode, nvar, lmaxg, lmaxgp, lm
     )
 
     # .. isentropic ("adiabatic") initial conditions
-    psi = -1.0
-    C = (15.0 + 4.0 * fracnu) / 20.0 * psi
+    s2_2 = 1.0
+    psi  = -1.0
+    C    = (15.0 + 4.0 * fracnu) / 20.0 * psi
     akt2 = (kmode * tau)**2
-    h = C * akt2 * (1.0 - 0.2 * yrad)
-    eta = 2.0 * C - (5.0 + 4.0 * fracnu) / 6.0 / (15.0 + 4.0 * fracnu) * C * akt2 * (1.0 - yrad / 3.0)
-    f1 = (23.0 + 4.0 * fracnu) / (15.0 + 4.0 * fracnu)
+    h    = C * akt2 * (1.0 - 0.2 * yrad)
+    eta  = 2.0 * C - (5.0 + 4.0 * fracnu) / 6.0 / (15.0 + 4.0 * fracnu) * C * akt2 * (1.0 - yrad / 3.0)
+    f1   = (23.0 + 4.0 * fracnu) / (15.0 + 4.0 * fracnu)
+
+    ahprime = 2.0 * C * kmode**2 * tau * a * (1.0 - 0.3 * yrad)
 
     deltac = -0.5 * h
     deltag = -2.0 / 3.0 * h * (1.0 - akt2 / 36.0)
@@ -775,7 +830,6 @@ def adiabatic_ics_one_mode( *, tau: float, param, kmode, nvar, lmaxg, lmaxgp, lm
     thetan = thetar
     shearr = 4.0 / 15.0 * kmode**2 / s * psi * (1.0 + 7.0 / 36.0 * yrad)
     shearn = shearr
-    ahprime = 2.0 * C * kmode**2 * tau * a * (1.0 - 0.3 * yrad)
 
     # ... metric
     y = y.at[0].set( a )
@@ -812,6 +866,15 @@ def adiabatic_ics_one_mode( *, tau: float, param, kmode, nvar, lmaxg, lmaxgp, lm
     y = y.at[iq1:iq2].set( -dlfdlq * thetan / v / kmode / 3.0 )
     y = y.at[iq2:iq3].set( -0.5 * dlfdlq * shearn )
     # higher moments are zero at the initial time
+
+    # ... quintessence, 1004.5509
+    cs2_Q  = 1.0
+    w_Q    = param['w_DE_0'] + param['w_DE_a'] * (1.0 - a)
+    deltaq = akt2 / 4 * (1+w_Q)*(4-3*cs2_Q)/(4-6*w_Q+3*cs2_Q) * psi * s2_2
+    thetaq = -akt2**2 / tau / 4 * cs2_Q/(4-6*w_Q+3*cs2_Q) * psi * s2_2
+
+    y = y.at[iq4+0].set( deltaq )
+    y = y.at[iq4+1].set( thetaq )
     
     return y
 
