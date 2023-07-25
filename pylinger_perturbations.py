@@ -134,8 +134,8 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
     shearr = y[11 + lmaxg + lmaxgp] / 2.0
 
     # ... quintessence field
-    deltaq = y[iq4+0]
-    thetaq = y[iq4+1]
+    deltaq = y[-2]
+    thetaq = y[-1]
 
     # ... evaluate thermodynamics
     tempb = tempb_of_tau_interp.evaluate(tau) #param['tempb_of_tau_spline']( tau )
@@ -167,7 +167,7 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
     cs2_Q     = 1.0
     w_Q       = param['w_DE_0'] + param['w_DE_a'] * (1.0 - a)
     w_Q_prime = - param['w_DE_a'] * aprimeoa * a
-    ca2_Q     = w_Q - w_Q_prime / 3 / (1+w_Q) / aprimeoa
+    ca2_Q     = w_Q - w_Q_prime / 3 / ((1+w_Q)+1e-6) / aprimeoa
     rhoDE     = a**(-3*(1+param['w_DE_0']+param['w_DE_a'])) * jnp.exp(3*(a-1)*param['w_DE_a'])
     rho_plus_p_theta_Q = (1+w_Q) * rhoDE * param['grhom'] * param['OmegaDE'] * thetaq * a**2
 
@@ -484,8 +484,8 @@ def model_synchronous_neutrino_cfa(*, tau, yin, param, kmode, lmaxg, lmaxgp, lma
     shearnu = y[iq0+2]
 
     # ... quintessence field
-    deltaq = y[iq0+3]
-    thetaq = y[iq0+4]
+    deltaq = y[-2]
+    thetaq = y[-1]
 
     # ... evaluate thermodynamics
     tempb = param['tempb_of_tau_spline'].evaluate( tau )
