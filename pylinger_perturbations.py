@@ -48,7 +48,7 @@ def compute_time_scales( *, k, a, param ):
 
     return tauh, tauk, tauc
 
-@partial(jax.jit, static_argnames=('lmaxg', 'lmaxgp', 'lmaxr', 'lmaxnu', 'nqmax'))
+#@partial(jax.jit, static_argnames=('lmaxg', 'lmaxgp', 'lmaxr', 'lmaxnu', 'nqmax'))
 def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, nqmax):     
     """Solve the synchronous gauge perturbation equations for a single mode.
 
@@ -401,7 +401,7 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
 
     return f.flatten()
 
-@partial(jax.jit, static_argnames=('lmaxg', 'lmaxgp', 'lmaxr'))
+#@partial(jax.jit, static_argnames=('lmaxg', 'lmaxgp', 'lmaxr'))
 def model_synchronous_neutrino_cfa(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr):
     """Solve the synchronous gauge perturbation equations for a single mode.
 
@@ -897,7 +897,7 @@ def determine_starting_time( *, param, k ):
 
     tau_k = 1.0/k
 
-    def get_tauc_tauH( tau, param ):
+    def get_tauc_tauH( tau ):
         xe = param['xe_of_tau_spline'].evaluate( tau )
         a = param['a_of_tau_spline'].evaluate( tau )
         opac = xe * akthom / a**2
@@ -907,7 +907,7 @@ def determine_starting_time( *, param, k ):
         aprimeoa = jnp.sqrt( grho / 3.0 )
         return 1.0/opac, 1.0/aprimeoa
 
-    def get_tauH( tau, param ):
+    def get_tauH( tau ):
         a = param['a_of_tau_spline'].evaluate( tau )
 
         grho, _ = compute_rho_p( a, param )
@@ -916,18 +916,18 @@ def determine_starting_time( *, param, k ):
         return 1.0/aprimeoa
 
     # condition for small k: tau_c(a) / tau_H(a) < start_small_k_at_tau_c_over_tau_h
-    def cond_small_k( logtau, param ):
-        tau_c, tau_H = get_tauc_tauH( jnp.exp(logtau), param )
+    def cond_small_k( logtau ):
+        tau_c, tau_H = get_tauc_tauH( jnp.exp(logtau) )
         return tau_c/tau_H/start_small_k_at_tau_c_over_tau_h - 1.0
 
     # condition for large k: tau_H(a) / tau_k < start_large_k_at_tau_k_over_tau_h
-    def cond_large_k( logtau, param ):
-        tau_H = get_tauH( jnp.exp(logtau), param )
+    def cond_large_k( logtau ):
+        tau_H = get_tauH( jnp.exp(logtau) )
         return tau_H/tau_k/start_large_k_at_tau_h_over_tau_k - 1.0
 
     
-    logtau_small_k =  Bisection(optimality_fun=lambda lt : cond_small_k(lt,param), lower=jnp.log(tau0), upper=jnp.log(tau1), maxiter=8, check_bracket=False).run().params
-    logtau_large_k =  Bisection(optimality_fun=lambda lt : cond_large_k(lt,param), lower=jnp.log(tau0), upper=jnp.log(tau1), maxiter=8, check_bracket=False).run().params
+    logtau_small_k =  Bisection(optimality_fun=lambda lt : cond_small_k(lt), lower=jnp.log(tau0), upper=jnp.log(tau1), maxiter=8, check_bracket=False).run().params
+    logtau_large_k =  Bisection(optimality_fun=lambda lt : cond_large_k(lt), lower=jnp.log(tau0), upper=jnp.log(tau1), maxiter=8, check_bracket=False).run().params
 
     return jnp.exp(jnp.minimum(logtau_small_k, logtau_large_k))
 
@@ -961,8 +961,10 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
     nvar   = 7 + (lmaxg + 1) + (lmaxgp + 1) + (lmaxr + 1) + nqmax * (lmaxnu + 1) + 2
 
     # ... determine starting time
-    tau_start = determine_starting_time( param=param, k=kmode )
-    tau_start = jnp.minimum( jnp.min(tau_out), tau_start )
+    tau_start = 0.01
+    #tau_start = determine_starting_time( param=param, k=kmode )
+    #tau_start = jnp.minimum( param['tau_of_a_spline'].evaluate(0.01), tau_start )
+    #tau_start = jnp.minimum( jnp.min(tau_out), tau_start )
 
     # ... set adiabatic ICs
     y0 = adiabatic_ics_one_mode( tau=tau_start, param=param, kmode=kmode, nvar=nvar, 
@@ -1028,7 +1030,7 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
     return jnp.where( tau_out[:,None]<tau_neutrino_cfa, y1_converted, sol2.ys )
 
 
-@partial(jax.jit, static_argnames=("num_k","lmaxg","lmaxgp", "lmaxr", "lmaxnu","nqmax","rtol","atol"))
+#@partial(jax.jit, static_argnames=("num_k","lmaxg","lmaxgp", "lmaxr", "lmaxnu","nqmax","rtol","atol"))
 def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k : int, \
                          lmaxg : int = 12, lmaxgp : int = 12, lmaxr : int = 17, lmaxnu : int = 17, \
                          nqmax : int = 15, rtol: float = 1e-3, atol: float = 1e-6 ):
