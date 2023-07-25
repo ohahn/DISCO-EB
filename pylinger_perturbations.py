@@ -167,7 +167,7 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
     cs2_Q     = 1.0
     w_Q       = param['w_DE_0'] + param['w_DE_a'] * (1.0 - a)
     w_Q_prime = - param['w_DE_a']
-    ca2_Q     = w_Q - w_Q_prime / 3 / (1+w_Q / aprimeoa)
+    ca2_Q     = w_Q - w_Q_prime / 3 / (1+w_Q) / aprimeoa
     rhoDE     = a**(-3*(1+param['w_DE_0']+param['w_DE_a'])) * jnp.exp(3*(a-1)*param['w_DE_a'])
     rho_plus_p_theta_Q = (1+w_Q) * rhoDE * param['grhom'] * param['OmegaDE'] * thetaq * a**2
 
@@ -193,6 +193,10 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
         + param['Nmnu'] * param['grhor'] * kmode * fnu / a**2
         + rho_plus_p_theta_Q
     )
+    dgshear = (
+        4.0 / 3.0 * (param['grhog'] * shearg + param['Neff'] * param['grhor'] * shearr) / a**2
+        + param['Nmnu'] * param['grhor'] * shearnu / a**2
+    )
 
     dahprimedtau = -(dgrho + 3.0 * dgpres) * a
     
@@ -204,11 +208,6 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
     etaprime = 0.5 * dgtheta / kmode**2
     alpha  = (hprime + 6.*etaprime)/2./kmode**2
     f = f.at[2].set( etaprime )
-
-    dgshear = (
-        4.0 / 3.0 * (param['grhog'] * shearg + param['Neff'] * param['grhor'] * shearr) / a**2
-        + param['Nmnu'] * param['grhor'] * shearnu / a**2
-    )
     
     alphaprime = -3*dgshear/(2*kmode**2) + eta - 2*aprimeoa*alpha
     alphaprime -=  9/2 * a**2/kmode**2 * 4/3*16/45/opac * (thetag+kmode**2*alpha) * param['grhog']
@@ -531,7 +530,7 @@ def model_synchronous_neutrino_cfa(*, tau, yin, param, kmode, lmaxg, lmaxgp, lma
     cs2_Q     = 1.0
     w_Q       = param['w_DE_0'] + param['w_DE_a'] * (1.0 - a)
     w_Q_prime = - param['w_DE_a']
-    ca2_Q     = w_Q - w_Q_prime / 3 / (1+w_Q / aprimeoa)
+    ca2_Q     = w_Q - w_Q_prime / 3 / (1+w_Q) / aprimeoa
     rhoDE     = a**(-3*(1+param['w_DE_0']+param['w_DE_a'])) * jnp.exp(3*(a-1)*param['w_DE_a'])
     rho_plus_p_theta_Q = (1+w_Q) * rhoDE * param['grhom'] * param['OmegaDE'] * thetaq * a**2
 
@@ -808,7 +807,7 @@ def adiabatic_ics_one_mode( *, tau: float, param, kmode, nvar, lmaxg, lmaxgp, lm
     )
 
     # .. isentropic ("adiabatic") initial conditions
-    s2_2 = 1.0
+    s2_squared = 1.0
     psi  = -1.0
     C    = (15.0 + 4.0 * fracnu) / 20.0 * psi
     akt2 = (kmode * tau)**2
@@ -870,8 +869,8 @@ def adiabatic_ics_one_mode( *, tau: float, param, kmode, nvar, lmaxg, lmaxgp, lm
     # ... quintessence, 1004.5509
     cs2_Q  = 1.0
     w_Q    = param['w_DE_0'] + param['w_DE_a'] * (1.0 - a)
-    deltaq = akt2 / 4 * (1+w_Q)*(4-3*cs2_Q)/(4-6*w_Q+3*cs2_Q) * psi * s2_2
-    thetaq = -akt2**2 / tau / 4 * cs2_Q/(4-6*w_Q+3*cs2_Q) * psi * s2_2
+    deltaq = -akt2 / 4 * (1+w_Q)*(4-3*cs2_Q)/(4-6*w_Q+3*cs2_Q) * psi * s2_squared
+    thetaq = -akt2**2 / tau / 4 * cs2_Q/(4-6*w_Q+3*cs2_Q) * psi * s2_squared
 
     y = y.at[iq4+0].set( deltaq )
     y = y.at[iq4+1].set( thetaq )
