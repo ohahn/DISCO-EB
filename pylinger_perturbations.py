@@ -869,8 +869,8 @@ def adiabatic_ics_one_mode( *, tau: float, param, kmode, nvar, lmaxg, lmaxgp, lm
     # ... quintessence, Ballesteros & Lesgourgues (2010, BL20), arXiv:1004.5509
     cs2_Q  = param['cs2_DE']
     w_Q    = param['w_DE_0'] + param['w_DE_a'] * (1.0 - a)
-    deltaq = -akt2 / 4 * (1+w_Q)*(4-3*cs2_Q)/(4-6*w_Q+3*cs2_Q) * psi * s2_squared # BL10 eq. 3.7
-    thetaq = -akt2**2 / tau / 4 * cs2_Q/(4-6*w_Q+3*cs2_Q) * psi * s2_squared      # BL10 eq. 3.8
+    deltaq = 0.0 #-akt2 / 4 * (1+w_Q)*(4-3*cs2_Q)/(4-6*w_Q+3*cs2_Q) * psi * s2_squared # BL10 eq. 3.7
+    thetaq = 0.0 #-akt2**2 / tau / 4 * cs2_Q/(4-6*w_Q+3*cs2_Q) * psi * s2_squared      # BL10 eq. 3.8
 
     y = y.at[-2].set( deltaq )
     y = y.at[-1].set( thetaq )
