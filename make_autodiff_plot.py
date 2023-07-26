@@ -20,9 +20,9 @@ YHe     = 0.248
 Omegam  = 0.3099
 Omegab  = 0.0488911
 # OmegaDE = 1.0-Omegam
-w_DE_0  = -1.0
+w_DE_0  = -0.99
 w_DE_a  = 0.0
-cs2_DE  = 1.0
+cs2_DE  = 0.99
 num_massive_neutrinos = 1
 mnu     = 0.06 #0.06 #eV
 Neff    = 2.046 # -1 if massive neutrino present
@@ -32,12 +32,11 @@ A_s     = 2.1064e-09
 n_s     = 0.96822
 
 
-fieldnames = ['$\\Omega_m$', '$\\Omega_b$', '$A_s$', '$n_s$', '$H_0$', '$T_{CMB}$', '$Y_{He}$', '$N_{eff}$', '$m_{\\nu}$', '$w_0$', '$w_a$', '$c_s^2$']
+fieldnames = ['\\Omega_m', '\\Omega_b', 'A_s', 'n_s', 'H_0', 'T_{CMB}', 'Y_{He}', 'N_{eff}', 'm_{\\nu}', 'w_0', 'w_a', 'c_s^2']
 fiducial_cosmo_param = jnp.array([Omegam, Omegab, A_s, n_s, H0, Tcmb, YHe, Neff, mnu, w_DE_0, w_DE_a, cs2_DE])
 
 
 
-# @eqx.filter_jit
 def f_of_Omegam( args ):
     param = {}
     param['Omegam'] = args[0]
@@ -74,7 +73,7 @@ def f_of_Omegam( args ):
 
     # Compute Perturbations
     nmodes = 256
-    kmin = 1e-3
+    kmin = 1e-4
     kmax = 1e1
     # aexp_out = jnp.array([1e-2,1e-1]) 
     aexp_out = jnp.geomspace(1e-2,1,2)
@@ -93,7 +92,7 @@ def f_of_Omegam( args ):
 #print( f_of_Omegam(fiducial_cosmo_param).shape )
 
 ## compute the jacobian at few times, but for many k
-k  = jnp.geomspace(1e-3,1e1,256)
+k  = jnp.geomspace(1e-4,1e1,256)
 dy = jax.jacfwd(f_of_Omegam)(fiducial_cosmo_param)
 
 #print( dy.shape )
@@ -104,8 +103,10 @@ for i,ff in enumerate(fieldnames):
     iy = i//3
     ix = i%3
     ax[iy,ix].semilogx(k, dy[:,i],label='$P_{b+c}$')
-
-    ax[iy,ix].set_title(ff)
+    ax[iy,ix].axhline(0.0, ls=':', color='k')
+    ax[iy,ix].set_title(f'$dP(k) / d{ff}$')
     
+for a in ax[-1,:]:
+    a.set_xlabel('$k / h Mpc^{-1}$')
 
 plt.savefig('derivatives.pdf')
