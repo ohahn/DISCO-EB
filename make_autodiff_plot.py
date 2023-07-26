@@ -65,10 +65,10 @@ def Pk_of_cosmo( args ):
     nqmax  = 15
 
     rtol   = 1e-3
-    atol   = 1e-5
+    atol   = 1e-6
 
     # Compute Perturbations
-    nmodes = 256
+    nmodes = 256  # number of modes to compute, reduce to speed up calculation
     kmin = 1e-4
     kmax = 1e1
     aexp_out = jnp.geomspace(1e-2,1,2)
@@ -87,7 +87,8 @@ def Pk_of_cosmo( args ):
 
 
 ## compute the jacobian 
-k  = jnp.geomspace(1e-4,1e1,256)
+k  = jnp.geomspace(1e-4,1e1,256) # number of modes to compute, reduce to speed up calculation
+
 dy = jax.jacfwd(Pk_of_cosmo)(fiducial_cosmo_param)
 
 
