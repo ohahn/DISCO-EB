@@ -29,9 +29,12 @@ n_s     = 0.96822
 ## Galaxy Parameters
 b1      = 1.3  # linear bias, should be close to 1.3 for ELGs
 
+## scale factor to evaluate
+a       = 1.0
+
 # list of parameters with respect to which we take derivatives
-fieldnames = ['b_1','\\Omega_m', '\\Omega_b', 'A_s', 'n_s', 'H_0', 'N_{eff}', 'm_{\\nu}', 'w_0', 'w_a']
-fiducial_cosmo_param = jnp.array([b1, Omegam, Omegab, A_s, n_s, H0, Neff, mnu, w_DE_0, w_DE_a])
+fieldnames = ['a','b_1','\\Omega_m', '\\Omega_b', 'A_s', 'n_s', 'H_0', 'N_{eff}', 'm_{\\nu}', 'w_0', 'w_a']
+fiducial_cosmo_param = jnp.array([a,b1, Omegam, Omegab, A_s, n_s, H0, Neff, mnu, w_DE_0, w_DE_a])
 
 
 def Pkbiased( args ):
@@ -75,7 +78,7 @@ def Pkbiased( args ):
     nmodes = 256  # number of modes to compute, reduce to speed up calculation
     kmin = 1e-3
     kmax = 1e0
-    aexp_out = jnp.geomspace(1e-2,1,2)
+    aexp_out = jnp.array([a])
 
     y, kmodes = evolve_perturbations( param=param, kmin=kmin, kmax=kmax, num_k=nmodes, aexp_out=aexp_out,
                                       lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax,
@@ -86,14 +89,17 @@ def Pkbiased( args ):
 
     iq0 = 10 + lmaxg + lmaxgp + lmaxr
 
-    Omeganu = (param['grhor'] * rhonu / a**4) / (param['grhom'] / a**3)
-
     rhonu = param['rhonu_of_a_spline'].evaluate(a)
+    fnu = (param['grhor'] * rhonu / a**4) / (param['grhom'] / a**3)
+    
     Pkc =  fac * A_s*(kmodes/k_p)**(n_s - 1) * kmodes**(-3) * y[:,iout,3]**2 
     Pkb =  fac * A_s*(kmodes/k_p)**(n_s - 1) * kmodes**(-3) * y[:,iout,5]**2 
     Pknu = fac * A_s*(kmodes/k_p)**(n_s - 1) * kmodes**(-3) * y[:,iout,iq0]**2
-    Pkm = (param['Omegam']-param['Omegab']) * Pkc + param['Omegab'] * Pkb + Omeganu * Pknu
     
+    Pkbc = (param['Omegam']-param['Omegab'])/param['Omegam'] * Pkc + param['Omegab']/param['Omegam'] * Pkb
+    
+    Pkm =  Pkbc + fnu * Pknu
+
     return b1**2 * Pkm
 
 
@@ -102,7 +108,7 @@ k  = jnp.geomspace(1e-3,1e0,256) # number of modes to compute, reduce to speed u
 
 Pk = Pkbiased( fiducial_cosmo_param )
 
-# dy = jax.jacfwd(Pkbiased)(fiducial_cosmo_param)
+dy = jax.jacfwd(Pkbiased)(fiducial_cosmo_param)
 
 fig, ax = plt.subplots()
 
@@ -112,17 +118,18 @@ ax.set_ylabel('$P(k)$')
 
 plt.savefig('Pk.pdf')
 
-# ## make the plot
-# fig,ax = plt.subplots(4,3,sharex=True,figsize=(13,10),layout='constrained')
+## make the plot
+fig,ax = plt.subplots(4,3,sharex=True,figsize=(13,10),layout='constrained')
 
-# for i,ff in enumerate(fieldnames):
-#     iy = i//3
-#     ix = i%3
-#     ax[iy,ix].semilogx(k, dy[:,i],label='$P_{b+c}$')
-#     ax[iy,ix].axhline(0.0, ls=':', color='k')
-#     ax[iy,ix].set_title(f'$dP(k) / d{ff}$')
+for i,ff in enumerate(fieldnames):
+    iy = i//3
+    ix = i%3
+    ax[iy,ix].semilogx(k, dy[:,i],label='$P_{b+c}$')
+    ax[iy,ix].axhline(0.0, ls=':', color='k')
+    ax[iy,ix].set_title(f'$dP(k) / d{ff}$')
     
-# for a in ax[-1,:]:
-#     a.set_xlabel('$k / h Mpc^{-1}$')
+for a in ax[-1,:]:
+    a.set_xlabel('$k / h Mpc^{-1}$')
 
-# plt.savefig('derivatives.pdf')
+plt.savefig('derivatives_bias.pdf')
+
