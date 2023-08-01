@@ -1341,7 +1341,7 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
 
     # create list of saveat times for first and second part of evolution
     saveat1 = drx.SaveAt(ts= jnp.where(tau_out<tau_neutrino_cfa,tau_out,tau_neutrino_cfa) )
-    saveat2 = drx.SaveAt(ts= jnp.where(jnp.logical_and(tau_out>=tau_neutrino_cfa,tau_out<tau_free_stream),tau_out,tau_neutrino_cfa) )
+    saveat2 = drx.SaveAt(ts= jnp.select([tau_out<tau_neutrino_cfa,tau_out>=tau_free_stream],[tau_neutrino_cfa,tau_free_stream],tau_out))
     saveat3 = drx.SaveAt(ts= jnp.where(tau_out>=tau_free_stream,tau_out,tau_free_stream) )
     
     
@@ -1376,8 +1376,8 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
         terms=model2,
         solver=solver,
         t0=sol1.ts[-1],
-        t1=tau_max,
-        dt0=jnp.minimum(tau_neutrino_cfa*0.5, 0.5*(tau_max - sol1.ts[-1])),
+        t1=tau_free_stream,
+        dt0=jnp.minimum(tau_neutrino_cfa*0.5, 0.5*(tau_free_stream - sol1.ts[-1])),
         y0=y0_neutrino_cfa,
         saveat=saveat2,
         stepsize_controller=stepsize_controller,
@@ -1412,14 +1412,22 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
         # adjoint=drx.RecursiveCheckpointAdjoint(),
         adjoint=drx.DirectAdjoint(),
     )
+   
+    
+    y1_converted = jax.vmap(
+        lambda tau, yin : convert_to_rsa(tau=tau, yin=yin, param=param, kmode=kmode, lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax ),
+        in_axes=0, out_axes=0 )( sol2.ts, yin=y1_converted )
+    
     y2_converted = jax.vmap(
         lambda tau, yin : convert_to_rsa(tau=tau, yin=yin, param=param, kmode=kmode, lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax ),
         in_axes=0, out_axes=0 )( sol2.ts, yin=sol2.ys )
     
     # solve after neutrinos become fluid
-    y2 = jnp.where( tau_out[:,None]<tau_neutrino_cfa, y1_converted, jnp.where(tau_out[:,None]<tau_free_stream, y2_converted, sol3.ys ) )
+    
+    #y2 = jnp.where( tau_out[:,None]<tau_neutrino_cfa, y1_converted, jnp.where(tau_out[:,None]<tau_free_stream), y2_converted, sol3.ys ) 
 
-    return y2
+    #return y2
+    return jnp.select( [tau_out[:,None]<tau_neutrino_cfa, tau_out[:,None]>tau_free_stream], [y1_converted, sol3.ys], y2_converted )
 
 
 @partial(jax.jit, static_argnames=("num_k","lmaxg","lmaxgp", "lmaxr", "lmaxnu","nqmax","rtol","atol"))
@@ -1480,3 +1488,4 @@ def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k 
     )(kmodes)
     
     return y1, kmodes
+
