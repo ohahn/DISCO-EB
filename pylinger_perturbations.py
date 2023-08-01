@@ -317,7 +317,7 @@ def model_synchronous(*, tau, yin, param, kmode, tau_free_stream, lmaxg, lmaxgp,
 
             return f
         
-        f = jax.lax.cond( not rsa_enabled, update_photons, lambda f: f, f )
+        f = jax.lax.cond( rsa_enabled, lambda f: f, update_photons, f )
         
         return f
     
@@ -417,7 +417,7 @@ def model_synchronous(*, tau, yin, param, kmode, tau_free_stream, lmaxg, lmaxgp,
 
         return f
     
-    f = jax.lax.cond( not rsa_enabled, update_massless_neutrinos, lambda f: f, f )
+    f = jax.lax.cond( rsa_enabled, lambda f: f, update_massless_neutrinos, f )
 
     # --- Massive neutrino equations of motion --------------------------------------------------------
     q = jnp.arange(1, nqmax + 1) - 0.5  # so dq == 1
