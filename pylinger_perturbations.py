@@ -593,12 +593,24 @@ def model_synchronous_neutrino_cfa(*, tau, yin, param, kmode, tau_free_stream, l
     # ... background scale factor evolution
     f = f.at[0].set( aprimeoa * a )
     
+    # RSA?
+    deltag = jax.lax.cond(  tau > tau_free_stream, lambda x: 0.0, lambda x: deltag, None )
+    deltar = jax.lax.cond(  tau > tau_free_stream, lambda x: 0.0, lambda x: deltar, None )
+
     # ... evaluate metric perturbations
     dgrho = (
         param['grhom'] * (Omegac * deltac + param['Omegab'] * deltab) / a
         + (param['grhog'] * deltag + param['grhor'] * (param['Neff'] * deltar + param['Nmnu'] * rhonu * deltanu)) / a**2
         + param['grhom'] * param['OmegaDE'] * deltaq * rhoDE * a**2
     )
+
+    # ... force energy conservation
+    hprime = (2.0 * kmode**2 * eta + dgrho) / aprimeoa
+
+    deltag, thetag, shearg, deltar, thetar, shearr = jax.lax.cond( tau > tau_free_stream, 
+        lambda x: compute_fields_RSA( k=kmode, aprimeoa=aprimeoa, hprime=hprime, eta=eta, deltab=deltab, thetab=thetab, cs2_b=cs2, tau_c=tauc, tau_c_prime=taucprime ),
+        lambda x: (deltag,thetag,shearg,deltar,thetar,shearr), None )
+    
     dgpres = (
         (param['grhog'] * deltag + param['grhor'] * param['Neff'] * deltar) / a**2 / 3.0 
         + param['grhor'] * param['Nmnu'] * dpnu / a**2 
@@ -619,8 +631,6 @@ def model_synchronous_neutrino_cfa(*, tau, yin, param, kmode, tau_free_stream, l
     
     f = f.at[1].set( dahprimedtau )
 
-    # ... force energy conservation
-    hprime = (2.0 * kmode**2 * eta + dgrho) / aprimeoa
     etaprime = 0.5 * dgtheta / kmode**2
     alpha  = (hprime + 6.*etaprime)/2./kmode**2
     f = f.at[2].set( etaprime )
@@ -648,40 +658,45 @@ def model_synchronous_neutrino_cfa(*, tau, yin, param, kmode, tau_free_stream, l
         f = f.at[idxb+1].set( thetabprime )
 
         # --- photon equations of motion, MB95 eqs. (63) ---------------------------------------------
-        idxg  = 7
-        idxgp = 7 + (lmaxg+1)
-        # ... polarization term
-        polter = y[idxg+2] + y[idxgp+0] + y[idxgp+2]
-        # ... photon density, BLT11 eq. (2.4a)
-        deltagprime = 4.0 / 3.0 * (-thetag - 0.5 * hprime)
-        f = f.at[idxg+0].set( deltagprime )
-        # ... photon velocity, BLT11 eq. (2.4b)
-        thetagprime = kmode**2 * (0.25 * deltag - s2_squared * shearg) \
-                    - opac * (thetag - thetab)
-        f = f.at[idxg+1].set( thetagprime )
-        # ... photon shear, BLT11 eq. (2.4c)
-        sheargprime = 8./15. * (thetag+kmode**2*alpha) -3/5*kmode*s_l3/s_l2*y[idxg+3] \
-                    - opac*(y[idxg+2]-0.1*s_l2*polter)
-        f = f.at[idxg+2].set( sheargprime )
+        def update_photons( f ):
+            idxg  = 7
+            idxgp = 7 + (lmaxg+1)
+            # ... polarization term
+            polter = y[idxg+2] + y[idxgp+0] + y[idxgp+2]
+            # ... photon density, BLT11 eq. (2.4a)
+            deltagprime = 4.0 / 3.0 * (-thetag - 0.5 * hprime)
+            f = f.at[idxg+0].set( deltagprime )
+            # ... photon velocity, BLT11 eq. (2.4b)
+            thetagprime = kmode**2 * (0.25 * deltag - s2_squared * shearg) \
+                        - opac * (thetag - thetab)
+            f = f.at[idxg+1].set( thetagprime )
+            # ... photon shear, BLT11 eq. (2.4c)
+            sheargprime = 8./15. * (thetag+kmode**2*alpha) -3/5*kmode*s_l3/s_l2*y[idxg+3] \
+                        - opac*(y[idxg+2]-0.1*s_l2*polter)
+            f = f.at[idxg+2].set( sheargprime )
 
-        # photon temperature l>=3, BLT11 eq. (2.4d)
-        ell  = jnp.arange(3, lmaxg )
-        f = f.at[idxg+ell].set( kmode  / (2 * ell + 1) * (ell * y[idxg+ell-1] - (ell + 1) * y[idxg+ell+1]) - opac * y[idxg+ell] )
-        # photon temperature hierarchy truncation, BLT11 eq. (2.5)
-        f = f.at[idxg+lmaxg].set( kmode * y[idxg+lmaxg-1] - (lmaxg + 1) / tau * y[idxg+lmaxg] - opac * y[idxg+lmaxg] )
-    
-        # polarization equations, BLT11 eq. (2.4e)
-        # photon polarization l=0
-        f = f.at[idxgp+0].set( -kmode * y[idxgp+1] - opac * y[idxgp] + 0.5 * opac * polter )
-        # photon polarization l=1delta_nu = jnp.sum( y[iq0:iq1] * )
-        f = f.at[idxgp+1].set( kmode / 3.0 * (y[idxgp] - 2.0 * y[idxgp+2]) - opac * y[idxgp+1] )
-        # photon polarization l=2
-        f = f.at[idxgp+2].set( kmode * (0.4 * y[idxgp+1] - 0.6 * y[idxgp+3]) - opac * (y[idxgp+2] - 0.1 * s_l2 * polter))
-        # photon polarization lmax>l>=3
-        ell  = jnp.arange(3, lmaxgp)
-        f = f.at[idxgp+ell].set( kmode  / (2 * ell + 1) * (ell * y[idxgp+ell-1] - (ell + 1) * y[idxgp+ell+1]) - opac * y[idxgp+ell] )
-        # photon polarization hierarchy truncation
-        f = f.at[idxgp+lmaxgp].set( kmode * y[idxgp+lmaxgp-1] - (lmaxgp + 1) / tau * y[idxgp+lmaxgp] - opac * y[idxgp+lmaxgp] )
+            # photon temperature l>=3, BLT11 eq. (2.4d)
+            ell  = jnp.arange(3, lmaxg )
+            f = f.at[idxg+ell].set( kmode  / (2 * ell + 1) * (ell * y[idxg+ell-1] - (ell + 1) * y[idxg+ell+1]) - opac * y[idxg+ell] )
+            # photon temperature hierarchy truncation, BLT11 eq. (2.5)
+            f = f.at[idxg+lmaxg].set( kmode * y[idxg+lmaxg-1] - (lmaxg + 1) / tau * y[idxg+lmaxg] - opac * y[idxg+lmaxg] )
+        
+            # polarization equations, BLT11 eq. (2.4e)
+            # photon polarization l=0
+            f = f.at[idxgp+0].set( -kmode * y[idxgp+1] - opac * y[idxgp] + 0.5 * opac * polter )
+            # photon polarization l=1delta_nu = jnp.sum( y[iq0:iq1] * )
+            f = f.at[idxgp+1].set( kmode / 3.0 * (y[idxgp] - 2.0 * y[idxgp+2]) - opac * y[idxgp+1] )
+            # photon polarization l=2
+            f = f.at[idxgp+2].set( kmode * (0.4 * y[idxgp+1] - 0.6 * y[idxgp+3]) - opac * (y[idxgp+2] - 0.1 * s_l2 * polter))
+            # photon polarization lmax>l>=3
+            ell  = jnp.arange(3, lmaxgp)
+            f = f.at[idxgp+ell].set( kmode  / (2 * ell + 1) * (ell * y[idxgp+ell-1] - (ell + 1) * y[idxgp+ell+1]) - opac * y[idxgp+ell] )
+            # photon polarization hierarchy truncation
+            f = f.at[idxgp+lmaxgp].set( kmode * y[idxgp+lmaxgp-1] - (lmaxgp + 1) / tau * y[idxgp+lmaxgp] - opac * y[idxgp+lmaxgp] )
+
+            return f
+        
+        f = jax.lax.cond( tau <= tau_free_stream, update_photons, lambda f: f, f )
         
         return f
     
@@ -763,18 +778,23 @@ def model_synchronous_neutrino_cfa(*, tau, yin, param, kmode, tau_free_stream, l
     
     
     # --- Massless neutrino equations of motion -------------------------------------------------------
-    idxr = 9 + lmaxg + lmaxgp
-    deltarprime = 4.0 / 3.0 * (-thetar - 0.5 * hprime)
-    f = f.at[idxr+0].set( deltarprime )
-    thetarprime = kmode**2 * (0.25 * deltar - shearr)
-    f = f.at[idxr+1].set( thetarprime )
-    shearrprime = 8./15. * (thetar + kmode**2 * alpha) - 0.6 * kmode * y[idxr+3]
-    f = f.at[idxr+2].set( shearrprime )
-    ell = jnp.arange(3, lmaxr)
-    f = f.at[idxr+ell].set( kmode / (2 * ell + 1) * (ell * y[idxr+ell-1] - (ell + 1) * y[idxr+ell+1]) )
+    def update_massless_neutrinos( f ):
+        idxr = 9 + lmaxg + lmaxgp
+        deltarprime = 4.0 / 3.0 * (-thetar - 0.5 * hprime)
+        f = f.at[idxr+0].set( deltarprime )
+        thetarprime = kmode**2 * (0.25 * deltar - shearr)
+        f = f.at[idxr+1].set( thetarprime )
+        shearrprime = 8./15. * (thetar + kmode**2 * alpha) - 0.6 * kmode * y[idxr+3]
+        f = f.at[idxr+2].set( shearrprime )
+        ell = jnp.arange(3, lmaxr)
+        f = f.at[idxr+ell].set( kmode / (2 * ell + 1) * (ell * y[idxr+ell-1] - (ell + 1) * y[idxr+ell+1]) )
+        
+        # ... truncate moment expansion
+        f = f.at[idxr+lmaxr].set( kmode * y[idxr+lmaxr-1] - (lmaxr + 1) / tau * y[idxr+lmaxr] )
+
+        return f
     
-    # ... truncate moment expansion
-    f = f.at[idxr+lmaxr].set( kmode * y[idxr+lmaxr-1] - (lmaxr + 1) / tau * y[idxr+lmaxr] )
+    f = jax.lax.cond( tau <= tau_free_stream, update_massless_neutrinos, lambda f: f, f )
 
     # --- Massive neutrino equations of motion, fluid approximation -----------------------------------
     # LT11: CLASS IV: ncdm, Lesgourgues & Tram 2011, https://arxiv.org/abs/1104.2935
