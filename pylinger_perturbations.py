@@ -703,7 +703,7 @@ def model_synchronous_neutrino_cfa(*, tau, yin, param, kmode, tau_free_stream, l
 
             return f
         
-        f = jax.lax.cond( not rsa_enabled, update_photons, lambda f: f, f )
+        f = jax.lax.cond( rsa_enabled, lambda f: f, update_photons, f )
         
         return f
     
@@ -799,7 +799,7 @@ def model_synchronous_neutrino_cfa(*, tau, yin, param, kmode, tau_free_stream, l
 
         return f
     
-    f = jax.lax.cond( not rsa_enabled, update_massless_neutrinos, lambda f: f, f )
+    f = jax.lax.cond( rsa_enabled, lambda f: f, update_massless_neutrinos, f )
 
     # --- Massive neutrino equations of motion, fluid approximation -----------------------------------
     # LT11: CLASS IV: ncdm, Lesgourgues & Tram 2011, https://arxiv.org/abs/1104.2935
