@@ -113,6 +113,9 @@ def model_synchronous(*, tau, yin, param, kmode, tau_free_stream, lmaxg, lmaxgp,
     f : array_like
         RHS of perturbation equations
     """
+    radiation_streaming_trigger_tau_c_over_tau = 5.0    # value taken from CLASS, not used (yet)
+    radiation_streaming_trigger_tau_over_tau_k = 45.    # value taken from CLASS, not used (yet)
+
     Omegac = param['Omegam'] - param['Omegab']
     tempb_of_tau_interp = param['tempb_of_tau_spline']
     cs2_of_tau_interp = param['cs2_of_tau_spline']
@@ -213,8 +216,9 @@ def model_synchronous(*, tau, yin, param, kmode, tau_free_stream, lmaxg, lmaxgp,
     drhonu, dpnu, fnu, shearnu = nu_perturb( a, param['amnu'], y[iq0:iq1], y[iq1:iq2], y[iq2:iq3] )
 
     # RSA?
-    deltag = jax.lax.cond(  tau > tau_free_stream, lambda x: 0.0, lambda x: deltag, None )
-    deltar = jax.lax.cond(  tau > tau_free_stream, lambda x: 0.0, lambda x: deltar, None )
+    rsa_enabled = jnp.logical_and( tau > tau_free_stream, tau * kmode > radiation_streaming_trigger_tau_over_tau_k)
+    deltag = jax.lax.cond(  rsa_enabled, lambda x: 0.0, lambda x: deltag, None )
+    deltar = jax.lax.cond(  rsa_enabled, lambda x: 0.0, lambda x: deltar, None )
 
     dgrho = (
         param['grhom'] * (Omegac * deltac + param['Omegab'] * deltab) / a
@@ -225,7 +229,7 @@ def model_synchronous(*, tau, yin, param, kmode, tau_free_stream, lmaxg, lmaxgp,
     # ... force energy conservation
     hprime = (2.0 * kmode**2 * eta + dgrho) / aprimeoa
 
-    deltag, thetag, shearg, deltar, thetar, shearr = jax.lax.cond( tau > tau_free_stream, 
+    deltag, thetag, shearg, deltar, thetar, shearr = jax.lax.cond( rsa_enabled, 
         lambda x: compute_fields_RSA( k=kmode, aprimeoa=aprimeoa, hprime=hprime, eta=eta, deltab=deltab, thetab=thetab, cs2_b=cs2, tau_c=tauc, tau_c_prime=taucprime ),
         lambda x: (deltag,thetag,shearg,deltar,thetar,shearr), None )
 
@@ -313,7 +317,7 @@ def model_synchronous(*, tau, yin, param, kmode, tau_free_stream, lmaxg, lmaxgp,
 
             return f
         
-        f = jax.lax.cond( tau <= tau_free_stream, update_photons, lambda f: f, f )
+        f = jax.lax.cond( not rsa_enabled, update_photons, lambda f: f, f )
         
         return f
     
@@ -413,7 +417,7 @@ def model_synchronous(*, tau, yin, param, kmode, tau_free_stream, lmaxg, lmaxgp,
 
         return f
     
-    f = jax.lax.cond( tau <= tau_free_stream, update_massless_neutrinos, lambda f: f, f )
+    f = jax.lax.cond( not rsa_enabled, update_massless_neutrinos, lambda f: f, f )
 
     # --- Massive neutrino equations of motion --------------------------------------------------------
     q = jnp.arange(1, nqmax + 1) - 0.5  # so dq == 1
@@ -485,6 +489,8 @@ def model_synchronous_neutrino_cfa(*, tau, yin, param, kmode, tau_free_stream, l
     f : array_like
         RHS of perturbation equations
     """
+    radiation_streaming_trigger_tau_c_over_tau = 5.0    # value taken from CLASS, not used (yet)
+    radiation_streaming_trigger_tau_over_tau_k = 45.    # value taken from CLASS, not used (yet)
 
     Omegac = param['Omegam'] - param['Omegab']
 
@@ -594,8 +600,9 @@ def model_synchronous_neutrino_cfa(*, tau, yin, param, kmode, tau_free_stream, l
     f = f.at[0].set( aprimeoa * a )
     
     # RSA?
-    deltag = jax.lax.cond(  tau > tau_free_stream, lambda x: 0.0, lambda x: deltag, None )
-    deltar = jax.lax.cond(  tau > tau_free_stream, lambda x: 0.0, lambda x: deltar, None )
+    rsa_enabled = jnp.logical_and( tau > tau_free_stream, tau * kmode > radiation_streaming_trigger_tau_over_tau_k)
+    deltag = jax.lax.cond( rsa_enabled, lambda x: 0.0, lambda x: deltag, None )
+    deltar = jax.lax.cond( rsa_enabled, lambda x: 0.0, lambda x: deltar, None )
 
     # ... evaluate metric perturbations
     dgrho = (
@@ -607,7 +614,7 @@ def model_synchronous_neutrino_cfa(*, tau, yin, param, kmode, tau_free_stream, l
     # ... force energy conservation
     hprime = (2.0 * kmode**2 * eta + dgrho) / aprimeoa
 
-    deltag, thetag, shearg, deltar, thetar, shearr = jax.lax.cond( tau > tau_free_stream, 
+    deltag, thetag, shearg, deltar, thetar, shearr = jax.lax.cond( rsa_enabled, 
         lambda x: compute_fields_RSA( k=kmode, aprimeoa=aprimeoa, hprime=hprime, eta=eta, deltab=deltab, thetab=thetab, cs2_b=cs2, tau_c=tauc, tau_c_prime=taucprime ),
         lambda x: (deltag,thetag,shearg,deltar,thetar,shearr), None )
     
@@ -696,7 +703,7 @@ def model_synchronous_neutrino_cfa(*, tau, yin, param, kmode, tau_free_stream, l
 
             return f
         
-        f = jax.lax.cond( tau <= tau_free_stream, update_photons, lambda f: f, f )
+        f = jax.lax.cond( not rsa_enabled, update_photons, lambda f: f, f )
         
         return f
     
@@ -764,8 +771,6 @@ def model_synchronous_neutrino_cfa(*, tau, yin, param, kmode, tau_free_stream, l
     # --- check if we are in the tight coupling regime -----------------------------------------------
     tight_coupling_trigger_tau_c_over_tau_h=0.015       # value taken from CLASS
     tight_coupling_trigger_tau_c_over_tau_k=0.010       # value taken from CLASS
-    radiation_streaming_trigger_tau_c_over_tau = 5.0    # value taken from CLASS, not used (yet)
-    radiation_streaming_trigger_tau_over_tau_k = 45.    # value taken from CLASS, not used (yet)
 
     tauh = 1./aprimeoa  # TBC: or 1./(aprimeoa*a)?
     tauk = 1./kmode
@@ -794,7 +799,7 @@ def model_synchronous_neutrino_cfa(*, tau, yin, param, kmode, tau_free_stream, l
 
         return f
     
-    f = jax.lax.cond( tau <= tau_free_stream, update_massless_neutrinos, lambda f: f, f )
+    f = jax.lax.cond( not rsa_enabled, update_massless_neutrinos, lambda f: f, f )
 
     # --- Massive neutrino equations of motion, fluid approximation -----------------------------------
     # LT11: CLASS IV: ncdm, Lesgourgues & Tram 2011, https://arxiv.org/abs/1104.2935
