@@ -1189,6 +1189,7 @@ def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k 
     tau_max = jnp.max(tau_out)
     nout = aexp_out.shape[0]
     param['nout'] = nout
+    param['tau_max'] = tau_max
     
     # set up ICs and solve ODEs for all the modes
     y1 = jax.vmap(
