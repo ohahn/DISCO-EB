@@ -1336,7 +1336,7 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
 
     # determine time to apply free streaming approximation. if tau_free_stream < tau_neutrino_cfa, then don't use free streaming approximation
     tau_free_stream = determine_free_streaming_time( param=param, k=kmode,  radiation_streaming_trigger_tau_c_over_tau=radiation_streaming_trigger_tau_c_over_tau)
-    tau_free_stream = jnp.maximum( jnp.maximum( tau_free_stream, radiation_streaming_trigger_tau_over_tau_k/kmode ), tau_max )
+    tau_free_stream = jnp.minimum( jnp.maximum( tau_free_stream, radiation_streaming_trigger_tau_over_tau_k/kmode ), tau_max )
     tau_free_stream = jax.lax.cond( tau_free_stream > tau_neutrino_cfa, lambda x: tau_free_stream, lambda x: x, tau_max)
 
     # create list of saveat times for first and second part of evolution
