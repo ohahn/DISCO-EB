@@ -27,6 +27,7 @@ def compute_rho_p( a, param ):
 
     return grho, gpres
 
+@partial(jax.jit, inline=True)
 def compute_time_scales( *, k, a, param ):
     
     grho,_ = compute_rho_p( a, param )
@@ -48,6 +49,7 @@ def compute_time_scales( *, k, a, param ):
 
     return tauh, tauk, tauc
 
+@partial(jax.jit, inline=True)
 def compute_fields_RSA( *, k, aprimeoa, hprime, eta, deltab, thetab, cs2_b, tau_c, tau_c_prime ):
     """  Compute relativistic species in radiation streaming approximation (RSA) of Blas, Lesgroupe, Tram, 2011 (BLT11)
 
@@ -996,7 +998,8 @@ def model_synchronous_neutrino_cfa_rsa(*, tau, yin, param, kmode):
     return f.flatten()
 
 
-# @partial(jax.jit, static_argnames=('lmaxg', 'lmaxgp', 'lmaxr', 'lmaxnu', 'nqmax'))
+
+@partial(jax.jit, inline=True)
 def convert_to_neutrino_fluid(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, nqmax ):
     iq0 = 10 + lmaxg + lmaxgp + lmaxr
     iq1 = iq0 + nqmax
@@ -1026,6 +1029,7 @@ def convert_to_neutrino_fluid(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, l
     
     return y
 
+@partial(jax.jit, inline=True)
 def convert_to_rsa(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, nqmax ):
     iq0 = 10 + lmaxg + lmaxgp + lmaxr
     iq0_new = 7
@@ -1045,7 +1049,7 @@ def convert_to_rsa(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, nqma
     
     return y
 
-# @partial(jax.jit, static_argnames=('num_k', 'nvar', 'lmax', 'nqmax'))
+
 def adiabatic_ics_one_mode( *, tau: float, param, kmode, nvar, lmaxg, lmaxgp, lmaxr, lmaxnu, nqmax):
     """Initial conditions for adiabatic perturbations"""
     Omegac = param['Omegam'] - param['Omegab']
@@ -1145,7 +1149,7 @@ def adiabatic_ics_one_mode( *, tau: float, param, kmode, nvar, lmaxg, lmaxgp, lm
     
     return y
 
-# @jax.jit
+
 def determine_starting_time( *, param, k ):
     # ADOPTED from CLASS:
     # largest wavelengths start being sampled when universe is sufficiently opaque. This is quantified in terms of the ratio of thermo to hubble time scales, 
