@@ -997,7 +997,7 @@ def model_synchronous_neutrino_cfa_rsa(*, tau, yin, param, kmode):
 
 
 # @partial(jax.jit, static_argnames=('lmaxg', 'lmaxgp', 'lmaxr', 'lmaxnu', 'nqmax'))
-def neutrino_convert_to_fluid(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, nqmax ):
+def convert_to_neutrino_fluid(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, nqmax ):
     iq0 = 10 + lmaxg + lmaxgp + lmaxr
     iq1 = iq0 + nqmax
     iq2 = iq1 + nqmax
@@ -1008,7 +1008,7 @@ def neutrino_convert_to_fluid(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, l
     nvarnu = 10 + lmaxg + lmaxgp + lmaxr + 3 + 2
     y = jnp.zeros((nvarnu))
     
-    drhonu, dpnu, fnu, shearnu = nu_perturb( a, param['amnu'], yin[iq0:iq1], yin[iq1:iq2], yin[iq2:iq3] )
+    drhonu, _, fnu, shearnu = nu_perturb( a, param['amnu'], yin[iq0:iq1], yin[iq1:iq2], yin[iq2:iq3] )
     rhonu = param['rhonu_of_a_spline'].evaluate( a )
     pnu = param['pnu_of_a_spline'].evaluate( a ) 
     rho_plus_p = rhonu + pnu
@@ -1289,50 +1289,35 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
     saveat2 = drx.SaveAt(ts= jnp.select([tau_out<tau_neutrino_cfa,tau_out>=tau_free_stream],[tau_neutrino_cfa,tau_free_stream],tau_out))
     saveat3 = drx.SaveAt(ts= jnp.where(tau_out>=tau_free_stream,tau_out,tau_free_stream) )
     
-    
-    # create solver, we use the Kvaerno5 solver, which is a 5th order implicit solver
-    solver = drx.Kvaerno5()
-    
-    # create stepsize controller, we use a PID controller
-    stepsize_controller = drx.PIDController(rtol=rtol, atol=atol)#, pcoeff=0.4, icoeff=0.3, dcoeff=0)
+    # create solver wrapper, we use the Kvaerno5 solver, which is a 5th order implicit solver
+    def DEsolve( *, model, t0, t1, y0, saveat ):
+        return drx.diffeqsolve(
+            terms=model,
+            solver=drx.Kvaerno5(),
+            t0=t0,
+            t1=t1,
+            dt0=jnp.minimum(t0/2, 0.5*(t1-t0)),
+            y0=y0,
+            saveat=saveat,
+            stepsize_controller = drx.PIDController(rtol=rtol, atol=atol)#, pcoeff=0.4, icoeff=0.3, dcoeff=0),
+            max_steps=4096,
+            args=(param, kmode, ),
+            # adjoint=drx.RecursiveCheckpointAdjoint(),
+            adjoint=drx.DirectAdjoint(),
+        )
     
     # solve before neutrinos become fluid
-    sol1 = drx.diffeqsolve(
-        terms=model1,
-        solver=solver,
-        t0=tau_start,
-        t1=tau_neutrino_cfa,
-        dt0=jnp.minimum(tau_start/2, 0.5*(tau_neutrino_cfa-tau_start)),
-        y0=y0,
-        saveat=saveat1,
-        stepsize_controller=stepsize_controller,
-        max_steps=4096,
-        args=(param, kmode, ),
-        # adjoint=drx.RecursiveCheckpointAdjoint(),
-        adjoint=drx.DirectAdjoint(),
-    )
+    sol1 = DEsolve( model=model1, t0=tau_start, t1=tau_neutrino_cfa, y0=y0, saveat=saveat1 )
     
     # convert neutrinos to fluid by integrating over the momentum bins
-    y0_neutrino_cfa = neutrino_convert_to_fluid( tau=sol1.ts[-1], yin=sol1.ys[-1,:], param=param, kmode=kmode, 
+    y0_neutrino_cfa = convert_to_neutrino_fluid( tau=sol1.ts[-1], yin=sol1.ys[-1,:], param=param, kmode=kmode, 
                                             lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax )
     
     # solve after neutrinos become fluid
-    sol2 = drx.diffeqsolve(
-        terms=model2,
-        solver=solver,
-        t0=sol1.ts[-1],
-        t1=tau_free_stream,
-        dt0=jnp.minimum(tau_neutrino_cfa*0.5, 0.5*(tau_free_stream - sol1.ts[-1])),
-        y0=y0_neutrino_cfa,
-        saveat=saveat2,
-        stepsize_controller=stepsize_controller,
-        max_steps=4096,
-        args=( param, kmode, ),
-        # adjoint=drx.RecursiveCheckpointAdjoint(),
-        adjoint=drx.DirectAdjoint(),
-    )
+    sol2 = DEsolve( model=model2, t0=sol1.ts[-1], t1=tau_free_stream, y0=y0_neutrino_cfa, saveat=saveat2 )
+    
     y1_converted = jax.vmap( 
-        lambda tau, yin : neutrino_convert_to_fluid(tau=tau, yin=yin, param=param, kmode=kmode, lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax ), 
+        lambda tau, yin : convert_to_neutrino_fluid(tau=tau, yin=yin, param=param, kmode=kmode, lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax ), 
         in_axes=0, out_axes=0 )( sol1.ts, yin=sol1.ys )
     
     # convert neutrinos to fluid by integrating over the momentum bins
@@ -1340,21 +1325,7 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
                                             lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax )
     
     # solve using radiation streaming approximation
-    sol3 = drx.diffeqsolve(
-        terms=model3,
-        solver=solver,
-        t0=sol2.ts[-1],
-        t1=tau_max,
-        dt0=jnp.minimum(tau_free_stream*0.5, 0.5*(tau_max - sol2.ts[-1])),
-        y0=y1_rsa,
-        saveat=saveat3,
-        stepsize_controller=stepsize_controller,
-        max_steps=4096,
-        args=( param, kmode, ),
-        # adjoint=drx.RecursiveCheckpointAdjoint(),
-        adjoint=drx.DirectAdjoint(),
-    )
-   
+    sol3 = DEsolve( model=model3, t0=sol2.ts[-1], t1=tau_max, y0=y1_rsa, saveat=saveat3 )
     
     y1_converted = jax.vmap(
         lambda tau, yin : convert_to_rsa(tau=tau, yin=yin, param=param, kmode=kmode, lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax ),
