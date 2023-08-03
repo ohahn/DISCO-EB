@@ -27,7 +27,6 @@ def compute_rho_p( a, param ):
 
     return grho, gpres
 
-@partial(jax.jit, inline=True)
 def compute_time_scales( *, k, a, param ):
     
     grho,_ = compute_rho_p( a, param )
@@ -84,7 +83,6 @@ def compute_fields_RSA( *, k, aprimeoa, hprime, eta, deltab, thetab, cs2_b, tau_
     shearr = 0.0
 
     return deltag, thetag, shearg, deltar, thetar, shearr 
-
 
 def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, nqmax):     
     """Solve the synchronous gauge perturbation equations for a single mode.
@@ -435,7 +433,6 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
 
     return f.flatten()
 
-#@partial(jax.jit, static_argnames=('lmaxg', 'lmaxgp', 'lmaxr'))
 def model_synchronous_neutrino_cfa(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr):
     """Solve the synchronous gauge perturbation equations for a single mode.
 
@@ -777,6 +774,7 @@ def model_synchronous_neutrino_cfa(*, tau, yin, param, kmode, lmaxg, lmaxgp, lma
 
     return f.flatten()
 
+
 def model_synchronous_neutrino_cfa_rsa(*, tau, yin, param, kmode):
     """Solve the synchronous gauge perturbation equations for a single mode.
 
@@ -999,7 +997,6 @@ def model_synchronous_neutrino_cfa_rsa(*, tau, yin, param, kmode):
 
 
 
-@partial(jax.jit, inline=True)
 def convert_to_neutrino_fluid(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, nqmax ):
     iq0 = 10 + lmaxg + lmaxgp + lmaxr
     iq1 = iq0 + nqmax
@@ -1029,7 +1026,6 @@ def convert_to_neutrino_fluid(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, l
     
     return y
 
-@partial(jax.jit, inline=True)
 def convert_to_rsa(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, nqmax ):
     iq0 = 10 + lmaxg + lmaxgp + lmaxr
     iq0_new = 7
@@ -1269,10 +1265,10 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
     nvar   = 7 + (lmaxg + 1) + (lmaxgp + 1) + (lmaxr + 1) + nqmax * (lmaxnu + 1) + 2
 
     # ... determine starting time
-    tau_start = 0.01
-    #tau_start = determine_starting_time( param=param, k=kmode )
-    #tau_start = jnp.minimum( param['tau_of_a_spline'].evaluate(0.01), tau_start )
-    #tau_start = jnp.minimum( jnp.min(tau_out), tau_start )
+    # tau_start = 0.01
+    tau_start = determine_starting_time( param=param, k=kmode )
+    # tau_start = jnp.minimum( param['tau_of_a_spline'].evaluate(0.01), tau_start )
+    tau_start = jnp.minimum( jnp.min(tau_out), tau_start )
 
     # ... set adiabatic ICs
     y0 = adiabatic_ics_one_mode( tau=tau_start, param=param, kmode=kmode, nvar=nvar, 
@@ -1303,13 +1299,13 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
             dt0=jnp.minimum(t0/2, 0.5*(t1-t0)),
             y0=y0,
             saveat=saveat,
-            stepsize_controller = drx.PIDController(rtol=rtol, atol=atol)#, pcoeff=0.4, icoeff=0.3, dcoeff=0),
+            stepsize_controller = drx.PIDController(rtol=rtol, atol=atol),#, pcoeff=0.4, icoeff=0.3, dcoeff=0),
             max_steps=4096,
             args=(param, kmode, ),
             # adjoint=drx.RecursiveCheckpointAdjoint(),
             adjoint=drx.DirectAdjoint(),
         )
-    
+
     # solve before neutrinos become fluid
     sol1 = DEsolve( model=model1, t0=tau_start, t1=tau_neutrino_cfa, y0=y0, saveat=saveat1 )
     
@@ -1342,10 +1338,9 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
     return jnp.select( [tau_out[:,None]<tau_neutrino_cfa, tau_out[:,None]>tau_free_stream], [y1_converted, sol3.ys], y2_converted )
 
 
-@partial(jax.jit, static_argnames=("num_k","lmaxg","lmaxgp", "lmaxr", "lmaxnu","nqmax","rtol","atol"))
 def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k : int, \
                          lmaxg : int = 12, lmaxgp : int = 12, lmaxr : int = 17, lmaxnu : int = 17, \
-                         nqmax : int = 15, rtol: float = 1e-3, atol: float = 1e-6 ):
+                         nqmax : int = 15, rtol: float = 1e-3, atol: float = 1e-3 ):
     """evolve cosmological perturbations in the synchronous gauge
 
     Parameters
