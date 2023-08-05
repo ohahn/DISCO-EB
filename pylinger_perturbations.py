@@ -220,7 +220,7 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
     dgpres = (
         (param['grhog'] * deltag + param['grhor'] * param['Neff'] * deltar) / a**2 / 3.0 
         + param['grhor'] * param['Nmnu'] * dpnu / a**2 
-        + (cs2_Q * param['grhom'] * param['OmegaDE'] * deltaq * rhoDE * a**2 + (cs2_Q-ca2_Q)*(3*aprimeoa * rho_plus_p_theta_Q / kmode**2))
+        + (cs2_Q * param['grhom'] * param['OmegaDE'] * deltaq * rhoDE * a**2 + (cs2_Q-ca2_Q)*(3*aprimeoa * rho_plus_p_theta_Q / kmode**2)) 
     )
     dgtheta = (
         param['grhom'] * (Omegac * thetac + param['Omegab'] * thetab) / a
@@ -237,7 +237,7 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
     
     f = f.at[1].set( dahprimedtau )
 
-    # ... force energy conservation
+    # ... hprime is not evolved but the energy constraint
     hprime = (2.0 * kmode**2 * eta + dgrho) / aprimeoa
     etaprime = 0.5 * dgtheta / kmode**2
     alpha  = (hprime + 6.*etaprime)/2./kmode**2
@@ -377,6 +377,7 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
         calc_baryon_photon_uncoupled, calc_baryon_photon_tca_CLASS, f )
     
     # f = calc_baryon_photon_tca( f )
+    # f = calc_baryon_photon_uncoupled( f )
     
     
     # --- Massless neutrino equations of motion -------------------------------------------------------
@@ -418,14 +419,15 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
         )
 
     # Truncate moment expansion.
-    f = f.at[-nqmax :].set(
-        kmode * v * y[-2 * nqmax : -nqmax] - (lmaxnu + 1) / tau * y[-nqmax :]
+    f = f.at[-nqmax-2 :-2].set(
+        kmode * v * y[-2 * nqmax-2: -nqmax-2] - (lmaxnu + 1) / tau * y[-nqmax-2:-2]
     )
 
     # ---- Quintessence equations of motion -----------------------------------------------------------
     # ... Ballesteros & Lesgourgues (2010, BL10), arXiv:1004.5509
     f = f.at[-2].set( # BL10, eq. (3.5)
-        -(1+w_Q) *(thetaq + 0.5 * hprime) - 3*(cs2_Q - w_Q) * aprimeoa * deltaq - 9*(1+w_Q)*(cs2_Q-ca2_Q)*aprimeoa**2/kmode**2 * thetaq
+        -(1+w_Q) *(thetaq + 0.5 * hprime) - 3*(cs2_Q - w_Q) * aprimeoa * deltaq 
+        - 9*(1+w_Q)*(cs2_Q-ca2_Q)*aprimeoa**2/kmode**2 * thetaq
     )
     f = f.at[-1].set( # BL10, eq. (3.6)
         -(1-3*cs2_Q)*aprimeoa*thetaq + cs2_Q/(1+w_Q) * kmode**2 * deltaq
@@ -595,7 +597,7 @@ def model_synchronous_neutrino_cfa(*, tau, yin, param, kmode, lmaxg, lmaxgp, lma
     
     f = f.at[1].set( dahprimedtau )
 
-    # ... force energy conservation
+    # ... hprime is not evolved but the energy constraint
     hprime = (2.0 * kmode**2 * eta + dgrho) / aprimeoa
     etaprime = 0.5 * dgtheta / kmode**2
     alpha  = (hprime + 6.*etaprime)/2./kmode**2
@@ -735,6 +737,8 @@ def model_synchronous_neutrino_cfa(*, tau, yin, param, kmode, lmaxg, lmaxgp, lma
                             tauc/tauk > 0.1*tight_coupling_trigger_tau_c_over_tau_k)),
         calc_baryon_photon_uncoupled, calc_baryon_photon_tca_CLASS, f )
     
+    # f = calc_baryon_photon_uncoupled( f )
+    
     
     # --- Massless neutrino equations of motion -------------------------------------------------------
     idxr = 9 + lmaxg + lmaxgp
@@ -766,7 +770,8 @@ def model_synchronous_neutrino_cfa(*, tau, yin, param, kmode, lmaxg, lmaxgp, lma
     # ---- Quintessence equations of motion -----------------------------------------------------------
     # ... Ballesteros & Lesgourgues (2010, BL10), arXiv:1004.5509
     f = f.at[-2].set( # BL10, eq. (3.5)
-        -(1+w_Q) *(thetaq + 0.5 * hprime) - 3*(cs2_Q - w_Q) * aprimeoa * deltaq - 9*(1+w_Q)*(cs2_Q-ca2_Q)*aprimeoa**2/kmode**2 * thetaq
+        -(1+w_Q) *(thetaq + 0.5 * hprime) - 3*(cs2_Q - w_Q) * aprimeoa * deltaq
+        - 9*(1+w_Q)*(cs2_Q-ca2_Q)*aprimeoa**2/kmode**2 * thetaq
     )
     f = f.at[-1].set( # BL10, eq. (3.6)
         -(1-3*cs2_Q)*aprimeoa*thetaq + cs2_Q/(1+w_Q) * kmode**2 * deltaq
@@ -922,7 +927,7 @@ def model_synchronous_neutrino_cfa_rsa(*, tau, yin, param, kmode):
         + param['grhom'] * param['OmegaDE'] * deltaq * rhoDE * a**2
     )
 
-    # ... force energy conservation
+    # ... hprime is not evolved but the energy constraint
     hprime = (2.0 * kmode**2 * eta + dgrho) / aprimeoa
 
     deltag, thetag, shearg, deltar, thetar, shearr = compute_fields_RSA( k=kmode, aprimeoa=aprimeoa, hprime=hprime, eta=eta, deltab=deltab, thetab=thetab, cs2_b=cs2, tau_c=tauc, tau_c_prime=taucprime )
@@ -987,7 +992,8 @@ def model_synchronous_neutrino_cfa_rsa(*, tau, yin, param, kmode):
     # ---- Quintessence equations of motion -----------------------------------------------------------
     # ... Ballesteros & Lesgourgues (2010, BL10), arXiv:1004.5509
     f = f.at[-2].set( # BL10, eq. (3.5)
-        -(1+w_Q) *(thetaq + 0.5 * hprime) - 3*(cs2_Q - w_Q) * aprimeoa * deltaq - 9*(1+w_Q)*(cs2_Q-ca2_Q)*aprimeoa**2/kmode**2 * thetaq
+        -(1+w_Q) *(thetaq + 0.5 * hprime) - 3*(cs2_Q - w_Q) * aprimeoa * deltaq 
+        - 9*(1+w_Q)*(cs2_Q-ca2_Q)*aprimeoa**2/kmode**2 * thetaq
     )
     f = f.at[-1].set( # BL10, eq. (3.6)
         -(1-3*cs2_Q)*aprimeoa*thetaq + cs2_Q/(1+w_Q) * kmode**2 * deltaq
@@ -1059,44 +1065,134 @@ def adiabatic_ics_one_mode( *, tau: float, param, kmode, nvar, lmaxg, lmaxgp, lm
     y = jnp.zeros((nvar))
     a = param['a_of_tau_spline'].evaluate(tau)
 
-    rhonu = param['rhonu_of_a_spline'].evaluate(a)
-    # pnu = param['pnu_of_a_spline'].evaluate(a)
+    if True:
 
-    grho, gpres = compute_rho_p( a, param )
+        def get_class_deltag():
+            rhom  = param['grhom'] * param['Omegam'] / a**3
+            rhor  = (param['grhog'] + param['grhor'] * (param['Neff'] + param['Nmnu']*param['rhonu_of_a_spline'].evaluate(a))) / a**4
+            rhonu = param['grhor'] * (param['Neff'] + param['Nmnu']*param['rhonu_of_a_spline'].evaluate(a)) / a**4
 
-    s = grho + gpres
+            fracb  = param['Omegab'] / param['Omegam']
+            fracg  = param['grhog'] / rhor
+            fracnu = rhonu / rhor
 
-    fracnu = param['grhor'] * (param['Neff'] + param['Nmnu']) * 4.0 / 3.0 / a**2 / s
+            om    = a * rhom / jnp.sqrt(rhor)
+            
+            curvature_ini = -1.0
+            s2_squared = 1.0
 
-    # ... use yrad=rho_matter/rho_rad to correct initial conditions for matter+radiation
-    yrad = (
-        param['grhom'] * param['Omegam'] * a
-        / (param['grhog'] + param['grhor'] * (param['Neff'] + param['Nmnu'] * rhonu))
-    )
+            #... photons
+            deltag = -(kmode*tau)**2 / 3 * (1 - om * tau / 5) * curvature_ini * s2_squared
+            return deltag
 
-    # .. isentropic ("adiabatic") initial conditions
-    s2_squared = 1.0
-    psi  = -1.0
-    C    = (15.0 + 4.0 * fracnu) / 20.0 * psi
-    akt2 = (kmode * tau)**2
-    h    = C * akt2 * (1.0 - 0.2 * yrad)
-    eta  = 2.0 * C - (5.0 + 4.0 * fracnu) / 6.0 / (15.0 + 4.0 * fracnu) * C * akt2 * (1.0 - yrad / 3.0)
-    f1   = (23.0 + 4.0 * fracnu) / (15.0 + 4.0 * fracnu)
+        #
+        rhonu = param['rhonu_of_a_spline'].evaluate(a)
+        # pnu = param['pnu_of_a_spline'].evaluate(a)
 
-    ahprime = 2.0 * C * kmode**2 * tau * a * (1.0 - 0.3 * yrad)
+        grho, gpres = compute_rho_p( a, param )
 
-    deltac = -0.5 * h
-    deltag = -2.0 / 3.0 * h * (1.0 - akt2 / 36.0)
-    deltab = 0.75 * deltag
-    deltar = -2.0 / 3.0 * h * (1.0 - akt2 / 36.0 * f1)
-    deltan = deltar
-    thetac = 0.0
-    thetag = -C / 18.0 * akt2 * akt2 / tau
-    thetab = thetag
-    thetar = f1 * thetag
-    thetan = thetar
-    shearr = 4.0 / 15.0 * kmode**2 / s * psi * (1.0 + 7.0 / 36.0 * yrad)
-    shearn = shearr
+        s = grho + gpres
+
+        fracnu = param['grhor'] * (param['Neff'] + param['Nmnu']) * 4.0 / 3.0 / a**2 / s
+
+        # ... use yrad=rho_matter/rho_rad to correct initial conditions for matter+radiation
+        yrad = (
+            param['grhom'] * param['Omegam'] * a
+            / (param['grhog'] + param['grhor'] * (param['Neff'] + param['Nmnu'] * rhonu))
+        )
+
+        # .. isentropic ("adiabatic") initial conditions
+        s2_squared = 1.0
+        psi  = -1.0
+        C    = (15.0 + 4.0 * fracnu) / 20.0 * psi
+        akt2 = (kmode * tau)**2
+        f1   = (23.0 + 4.0 * fracnu) / (15.0 + 4.0 * fracnu)
+        h    = C * akt2 * (1.0 - 0.2 * yrad)
+        
+        deltag = -2.0 / 3.0 * h * (1.0 - akt2 / 36.0)
+
+        deltag_class = get_class_deltag()
+        fac = deltag_class / deltag
+        psi *= fac
+
+        C *= fac
+        h *= fac
+
+        deltag = -2.0 / 3.0 * h * (1.0 - akt2 / 36.0)
+        thetag = -C / 18.0 * akt2 * akt2 / tau
+
+        deltar = -2.0 / 3.0 * h * (1.0 - akt2 / 36.0 * f1)
+        thetar = f1 * thetag
+        shearr = 4.0 / 15.0 * kmode**2 / s * psi * (1.0 + 7.0 / 36.0 * yrad)
+
+        deltan = deltar
+        thetan = thetar
+        shearn = shearr
+
+        deltab = 0.75 * deltag
+        thetab = thetag
+
+        deltac = -0.5 * h
+        thetac = 0.0
+
+        ahprime = 2.0 * C * kmode**2 * tau * a * (1.0 - 0.3 * yrad)
+        eta  = 2.0 * C - (5.0 + 4.0 * fracnu) / 6.0 / (15.0 + 4.0 * fracnu) * C * akt2 * (1.0 - yrad / 3.0)
+        
+
+
+        # ... quintessence, Ballesteros & Lesgourgues (2010, BL20), arXiv:1004.5509
+        cs2_Q  = param['cs2_DE']
+        w_Q    = param['w_DE_0'] + param['w_DE_a'] * (1.0 - a)
+        deltaq = -akt2 / 4 * (1+w_Q)*(4-3*cs2_Q)/(4-6*w_Q+3*cs2_Q) * psi * s2_squared # BL10 eq. 3.7
+        thetaq = -akt2**2 / tau / 4 * cs2_Q/(4-6*w_Q+3*cs2_Q) * psi * s2_squared      # BL10 eq. 3.8
+
+    else:
+        # .. isentropic ("adiabatic") initial conditions
+        rhom  = param['grhom'] * param['Omegam'] / a**3
+        rhor  = (param['grhog'] + param['grhor'] * (param['Neff'] + param['Nmnu']*param['rhonu_of_a_spline'].evaluate(a))) / a**4
+        rhonu = param['grhor'] * (param['Neff'] + param['Nmnu']*param['rhonu_of_a_spline'].evaluate(a)) / a**4
+
+        fracb  = param['Omegab'] / param['Omegam']
+        fracg  = param['grhog'] / rhor
+        fracnu = rhonu / rhor
+
+        om    = a * rhom / jnp.sqrt(rhor)
+        
+        curvature_ini = -1.0
+        s2_squared = 1.0
+
+        #... photons
+        deltag = -(kmode*tau)**2 / 3 * (1 - om * tau / 5) * curvature_ini * s2_squared
+        thetag = -(kmode*tau)**3/tau /36 * (1-3*(1+5*fracb-fracnu)/20/(1-fracnu)*om*tau) * curvature_ini * s2_squared
+
+        #... baryons
+        deltab = 0.75 * deltag
+        thetab = thetag
+
+        #... CDM
+        deltac = 0.75 * deltag
+        thetac = 0.0
+
+        #... massless neutrinos
+        deltar = deltag
+        thetar = -(kmode*tau)**4/tau/36/(4*fracnu+15) * (4*fracnu+11+12 - 3*(8*fracnu*fracnu+50*fracnu+275)/20/(2*fracnu+15)*tau*om) * curvature_ini
+        shearr = (kmode*tau)**2/(45+12*fracnu) * (3*s2_squared-1) * (1+(4*fracnu-5)/4/(2*fracnu+15)*tau*om) * curvature_ini
+
+        #... massive neutrinos
+        deltan = deltar
+        thetan = thetar
+        shearn = shearr
+
+        # ... quintessence, Ballesteros & Lesgourgues (2010, BL20), arXiv:1004.5509
+        cs2_Q  = param['cs2_DE']
+        w_Q    = param['w_DE_0'] + param['w_DE_a'] * (1.0 - a)
+        deltaq = (kmode*tau)**2 / 4 * (1+w_Q)*(4-3*cs2_Q)/(4-6*w_Q+3*cs2_Q) * curvature_ini * s2_squared # BL10 eq. 3.7
+        thetaq = (kmode*tau)**4 / tau / 4 * cs2_Q/(4-6*w_Q+3*cs2_Q) * curvature_ini * s2_squared      # BL10 eq. 3.8
+
+        # metric
+        eta = curvature_ini * (1-(kmode*tau)**2/12/(15+4*fracnu)*(5+4*s2_squared*fracnu - (16*fracnu*fracnu+280*fracnu+325)/10/(2*fracnu+15)*tau*om))
+
+        ahprime = 0.0 # will not be evolved, only constraint
 
     # ... metric
     y = y.at[0].set( a )
@@ -1127,7 +1223,7 @@ def adiabatic_ics_one_mode( *, tau: float, param, kmode, nvar, lmaxg, lmaxgp, lm
     q = jnp.arange(1, nqmax + 1) - 0.5  # so dq == 1
     aq = a * param['amnu'] / q
     v = 1 / jnp.sqrt(1 + aq**2)
-    akv = jnp.outer(kmode, v)
+    # akv = jnp.outer(kmode, v)
     dlfdlq = -q / (1.0 + jnp.exp(-q))
     y = y.at[iq0:iq1].set( -0.25 * dlfdlq * deltan )
     y = y.at[iq1:iq2].set( -dlfdlq * thetan / v / kmode / 3.0 )
@@ -1135,11 +1231,6 @@ def adiabatic_ics_one_mode( *, tau: float, param, kmode, nvar, lmaxg, lmaxgp, lm
     # higher moments are zero at the initial time
 
     # ... quintessence, Ballesteros & Lesgourgues (2010, BL20), arXiv:1004.5509
-    cs2_Q  = param['cs2_DE']
-    w_Q    = param['w_DE_0'] + param['w_DE_a'] * (1.0 - a)
-    deltaq = -akt2 / 4 * (1+w_Q)*(4-3*cs2_Q)/(4-6*w_Q+3*cs2_Q) * psi * s2_squared # BL10 eq. 3.7
-    thetaq = -akt2**2 / tau / 4 * cs2_Q/(4-6*w_Q+3*cs2_Q) * psi * s2_squared      # BL10 eq. 3.8
-
     y = y.at[-2].set( deltaq )
     y = y.at[-1].set( thetaq )
     
@@ -1151,7 +1242,7 @@ def determine_starting_time( *, param, k ):
     # largest wavelengths start being sampled when universe is sufficiently opaque. This is quantified in terms of the ratio of thermo to hubble time scales, 
     # \f$ \tau_c/\tau_H \f$. Start when start_largek_at_tau_c_over_tau_h equals this ratio. Decrease this value to start integrating the wavenumbers earlier 
     # in time.
-    start_small_k_at_tau_c_over_tau_h = 0.0015 / 100. 
+    start_small_k_at_tau_c_over_tau_h = 0.0015 #/ 200. 
 
     # ADOPTED from CLASS:
     #  largest wavelengths start being sampled when mode is sufficiently outside Hubble scale. This is quantified in terms of the ratio of hubble time scale 
@@ -1194,8 +1285,8 @@ def determine_starting_time( *, param, k ):
         return tau_H/tau_k/start_large_k_at_tau_h_over_tau_k - 1.0
 
     
-    logtau_small_k =  Bisection(optimality_fun=cond_small_k, lower=jnp.log(tau0), upper=jnp.log(tau1), maxiter=8, check_bracket=False).run(param=param).params
-    logtau_large_k =  Bisection(optimality_fun=cond_large_k, lower=jnp.log(tau0), upper=jnp.log(tau1), maxiter=8, check_bracket=False).run(param=param).params
+    logtau_small_k =  Bisection(optimality_fun=cond_small_k, lower=jnp.log(tau0), upper=jnp.log(tau1), maxiter=6, check_bracket=False).run(param=param).params
+    logtau_large_k =  Bisection(optimality_fun=cond_large_k, lower=jnp.log(tau0), upper=jnp.log(tau1), maxiter=6, check_bracket=False).run(param=param).params
 
     return jnp.exp(jnp.minimum(logtau_small_k, logtau_large_k))
 
@@ -1239,7 +1330,7 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
                         lmaxg : int = 12, lmaxgp : int = 12, lmaxr : int = 17, lmaxnu : int = 17, \
                         nqmax : int = 15, rtol: float = 1e-3, atol: float = 1e-4 ):
     
-    nu_fluid_trigger_tau_over_tau_k            = 31     # value taken from default CLASS settings
+    nu_fluid_trigger_tau_over_tau_k            = 31.0   # value taken from default CLASS settings
     radiation_streaming_trigger_tau_c_over_tau = 5.0    # value taken from CLASS
     radiation_streaming_trigger_tau_over_tau_k = 45.    # value taken from CLASS
 
@@ -1265,17 +1356,17 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
     nvar   = 7 + (lmaxg + 1) + (lmaxgp + 1) + (lmaxr + 1) + nqmax * (lmaxnu + 1) + 2
 
     # ... determine starting time
-    # tau_start = 0.01
-    tau_start = determine_starting_time( param=param, k=kmode )
-    # tau_start = jnp.minimum( param['tau_of_a_spline'].evaluate(0.01), tau_start )
-    tau_start = jnp.minimum( jnp.min(tau_out), tau_start )
+    tau_start = 0.01
+    # tau_start = determine_starting_time( param=param, k=kmode )
+    # # tau_start = jnp.minimum( param['tau_of_a_spline'].evaluate(0.01), tau_start )
+    # tau_start = jnp.minimum( jnp.min(tau_out), tau_start )
 
     # ... set adiabatic ICs
     y0 = adiabatic_ics_one_mode( tau=tau_start, param=param, kmode=kmode, nvar=nvar, 
                        lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax )
 
 
-    # ... switch between model1 and model2 depending on tau
+    # ... switch between mfodel1 and model2 depending on tau
     tauk = 1./kmode
     tau_neutrino_cfa = jnp.minimum(tauk * nu_fluid_trigger_tau_over_tau_k, 0.999*tau_max) # don't go to tau_max so that all modes are converted to massive neutrino approx
 
@@ -1283,11 +1374,6 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
     tau_free_stream = determine_free_streaming_time( param=param, k=kmode,  radiation_streaming_trigger_tau_c_over_tau=radiation_streaming_trigger_tau_c_over_tau)
     tau_free_stream = jnp.minimum( jnp.maximum( tau_free_stream, radiation_streaming_trigger_tau_over_tau_k/kmode ), tau_max )
     tau_free_stream = jax.lax.cond( tau_free_stream > tau_neutrino_cfa, lambda x: tau_free_stream, lambda x: x, tau_max)
-
-    # create list of saveat times for first and second part of evolution
-    saveat1 = drx.SaveAt(ts= jnp.where(tau_out<tau_neutrino_cfa,tau_out,tau_neutrino_cfa) )
-    saveat2 = drx.SaveAt(ts= jnp.select([tau_out<tau_neutrino_cfa,tau_out>=tau_free_stream],[tau_neutrino_cfa,tau_free_stream],tau_out))
-    saveat3 = drx.SaveAt(ts= jnp.where(tau_out>=tau_free_stream,tau_out,tau_free_stream) )
     
     # create solver wrapper, we use the Kvaerno5 solver, which is a 5th order implicit solver
     def DEsolve( *, model, t0, t1, y0, saveat ):
@@ -1298,44 +1384,72 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
             t1=t1,
             dt0=jnp.minimum(t0/2, 0.5*(t1-t0)),
             y0=y0,
-            saveat=saveat,
-            stepsize_controller = drx.PIDController(rtol=rtol, atol=atol),#, pcoeff=0.4, icoeff=0.3, dcoeff=0),
-            max_steps=4096,
+            saveat=saveat,  
+            stepsize_controller = drx.PIDController(rtol=rtol, atol=atol, pcoeff=0.1, icoeff=1.0, dcoeff=0.0),
+            # default controller has icoeff=1, pcoeff=0, dcoeff=0
+            max_steps=4096*4,
             args=(param, kmode, ),
             # adjoint=drx.RecursiveCheckpointAdjoint(),
             adjoint=drx.DirectAdjoint(),
         )
 
-    # solve before neutrinos become fluid
-    sol1 = DEsolve( model=model1, t0=tau_start, t1=tau_neutrino_cfa, y0=y0, saveat=saveat1 )
-    
-    # convert neutrinos to fluid by integrating over the momentum bins
-    y0_neutrino_cfa = convert_to_neutrino_fluid( tau=sol1.ts[-1], yin=sol1.ys[-1,:], param=param, kmode=kmode, 
-                                            lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax )
-    
-    # solve after neutrinos become fluid
-    sol2 = DEsolve( model=model2, t0=sol1.ts[-1], t1=tau_free_stream, y0=y0_neutrino_cfa, saveat=saveat2 )
-    
-    y1_converted = jax.vmap( 
-        lambda tau, yin : convert_to_neutrino_fluid(tau=tau, yin=yin, param=param, kmode=kmode, lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax ), 
-        in_axes=0, out_axes=0 )( sol1.ts, yin=sol1.ys )
-    
-    # convert neutrinos to fluid by integrating over the momentum bins
-    y1_rsa = convert_to_rsa( tau=sol2.ts[-1], yin=sol2.ys[-1,:], param=param, kmode=kmode, 
-                                            lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax )
-    
-    # solve using radiation streaming approximation
-    sol3 = DEsolve( model=model3, t0=sol2.ts[-1], t1=tau_max, y0=y1_rsa, saveat=saveat3 )
-    
-    y1_converted = jax.vmap(
-        lambda tau, yin : convert_to_rsa(tau=tau, yin=yin, param=param, kmode=kmode, lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax ),
-        in_axes=0, out_axes=0 )( sol2.ts, yin=y1_converted )
-    
-    y2_converted = jax.vmap(
-        lambda tau, yin : convert_to_rsa(tau=tau, yin=yin, param=param, kmode=kmode, lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax ),
-        in_axes=0, out_axes=0 )( sol2.ts, yin=sol2.ys )
-    
-    return jnp.select( [tau_out[:,None]<tau_neutrino_cfa, tau_out[:,None]>tau_free_stream], [y1_converted, sol3.ys], y2_converted )
+
+    if True:
+
+        # solve before neutrinos become fluid
+        saveat1 = drx.SaveAt(ts= jnp.where(tau_out<tau_neutrino_cfa,tau_out,tau_neutrino_cfa) )
+        saveat2 = drx.SaveAt(ts= jnp.where(tau_out>=tau_neutrino_cfa,tau_out,tau_neutrino_cfa) )
+
+        sol1 = DEsolve( model=model1, t0=tau_start, t1=tau_neutrino_cfa, y0=y0, saveat=saveat1 )
+        # convert neutrinos to fluid by integrating over the momentum bins
+        y0_neutrino_cfa = convert_to_neutrino_fluid( tau=sol1.ts[-1], yin=sol1.ys[-1,:], param=param, kmode=kmode, 
+                                                lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax )
+        # solve after neutrinos become fluid
+        sol2 = DEsolve( model=model2, t0=sol1.ts[-1], t1=tau_max, y0=y0_neutrino_cfa, saveat=saveat2 )
+        
+        y1_converted = jax.vmap( 
+            lambda tau, yin : convert_to_neutrino_fluid(tau=tau, yin=yin, param=param, kmode=kmode, lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax ), 
+            in_axes=0, out_axes=0 )( sol1.ts, yin=sol1.ys )
+        
+        return jnp.where( tau_out[:,None]<tau_neutrino_cfa, y1_converted, sol2.ys )
+
+    else:
+
+        # create list of saveat times for first and second part of evolution
+        saveat1 = drx.SaveAt(ts= jnp.where(tau_out<tau_neutrino_cfa,tau_out,tau_neutrino_cfa) )
+        saveat2 = drx.SaveAt(ts= jnp.select([tau_out<tau_neutrino_cfa,tau_out>=tau_free_stream],[tau_neutrino_cfa,tau_free_stream],tau_out))
+        saveat3 = drx.SaveAt(ts= jnp.where(tau_out>=tau_free_stream,tau_out,tau_free_stream) )
+
+        # solve before neutrinos become fluid
+        sol1 = DEsolve( model=model1, t0=tau_start, t1=tau_neutrino_cfa, y0=y0, saveat=saveat1 )
+        
+        # convert neutrinos to fluid by integrating over the momentum bins
+        y0_neutrino_cfa = convert_to_neutrino_fluid( tau=sol1.ts[-1], yin=sol1.ys[-1,:], param=param, kmode=kmode, 
+                                                lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax )
+        
+        # solve after neutrinos become fluid
+        sol2 = DEsolve( model=model2, t0=sol1.ts[-1], t1=tau_free_stream, y0=y0_neutrino_cfa, saveat=saveat2 )
+        
+        y1_converted = jax.vmap( 
+            lambda tau, yin : convert_to_neutrino_fluid(tau=tau, yin=yin, param=param, kmode=kmode, lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax ), 
+            in_axes=0, out_axes=0 )( sol1.ts, yin=sol1.ys )
+        
+        # convert neutrinos to fluid by integrating over the momentum bins
+        y1_rsa = convert_to_rsa( tau=sol2.ts[-1], yin=sol2.ys[-1,:], param=param, kmode=kmode, 
+                                                lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax )
+        
+        # solve using radiation streaming approximation
+        sol3 = DEsolve( model=model3, t0=sol2.ts[-1], t1=tau_max, y0=y1_rsa, saveat=saveat3 )
+        
+        y1_converted = jax.vmap(
+            lambda tau, yin : convert_to_rsa(tau=tau, yin=yin, param=param, kmode=kmode, lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax ),
+            in_axes=0, out_axes=0 )( sol2.ts, yin=y1_converted )
+        
+        y2_converted = jax.vmap(
+            lambda tau, yin : convert_to_rsa(tau=tau, yin=yin, param=param, kmode=kmode, lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax ),
+            in_axes=0, out_axes=0 )( sol2.ts, yin=sol2.ys )
+        
+        return jnp.select( [tau_out[:,None]<tau_neutrino_cfa, tau_out[:,None]>tau_free_stream], [y1_converted, sol3.ys], y2_converted )
 
 
 def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k : int, \
