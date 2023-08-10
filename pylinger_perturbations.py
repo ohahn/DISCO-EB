@@ -6,6 +6,10 @@ from jaxopt import Bisection
 import diffrax as drx
 import equinox as eqx
 
+import jax.flatten_util as fu
+
+from diffrax.custom_types import Array, PyTree, Scalar
+
 @partial(jax.jit, inline=True)
 def compute_rho_p( a, param ):
     rhonu = param['rhonu_of_a_spline'].evaluate(a)
@@ -381,6 +385,7 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
     
     
     # --- Massless neutrino equations of motion -------------------------------------------------------
+    #.. MB95, eqs. (49)
     idxr = 9 + lmaxg + lmaxgp
     deltarprime = 4.0 / 3.0 * (-thetar - 0.5 * hprime)
     f = f.at[idxr+0].set( deltarprime )
@@ -391,8 +396,9 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
     ell = jnp.arange(3, lmaxr)
     f = f.at[idxr+ell].set( kmode / (2 * ell + 1) * (ell * y[idxr+ell-1] - (ell + 1) * y[idxr+ell+1]) )
     
-    # ... truncate moment expansion
+    # ... truncate moment expansion, MB95, eq. (51) to find
     f = f.at[idxr+lmaxr].set( kmode * y[idxr+lmaxr-1] - (lmaxr + 1) / tau * y[idxr+lmaxr] )
+    
 
     # --- Massive neutrino equations of motion --------------------------------------------------------
     q = jnp.arange(1, nqmax + 1) - 0.5  # so dq == 1
@@ -1242,7 +1248,7 @@ def determine_starting_time( *, param, k ):
     # largest wavelengths start being sampled when universe is sufficiently opaque. This is quantified in terms of the ratio of thermo to hubble time scales, 
     # \f$ \tau_c/\tau_H \f$. Start when start_largek_at_tau_c_over_tau_h equals this ratio. Decrease this value to start integrating the wavenumbers earlier 
     # in time.
-    start_small_k_at_tau_c_over_tau_h = 0.0015 #/ 200. 
+    start_small_k_at_tau_c_over_tau_h = 0.0015 / 200. 
 
     # ADOPTED from CLASS:
     #  largest wavelengths start being sampled when mode is sufficiently outside Hubble scale. This is quantified in terms of the ratio of hubble time scale 
@@ -1251,7 +1257,7 @@ def determine_starting_time( *, param, k ):
     start_large_k_at_tau_h_over_tau_k = 0.07
 
     tau0 = param['taumin']
-    tau1 = param['tau_of_a_spline'].evaluate( 1e-2 ) # don't start after a=0.01
+    tau1 = param['tau_of_a_spline'].evaluate( 0.1 ) # don't start after a=0.1
     akthom = 2.3048e-9 * (1.0 - param['YHe']) * param['Omegab'] * param['H0']**2
 
     tau_k = 1.0/k
@@ -1277,6 +1283,7 @@ def determine_starting_time( *, param, k ):
     # condition for small k: tau_c(a) / tau_H(a) < start_small_k_at_tau_c_over_tau_h
     def cond_small_k( logtau, param ):
         tau_c, tau_H = get_tauc_tauH( jnp.exp(logtau), param )
+        # adotoa/opac > start_small_k_at_tau_c_over_tau_h
         return tau_c/tau_H/start_small_k_at_tau_c_over_tau_h - 1.0
 
     # condition for large k: tau_H(a) / tau_k < start_large_k_at_tau_k_over_tau_h
@@ -1312,7 +1319,7 @@ def determine_free_streaming_time( *, param, k, radiation_streaming_trigger_tau_
         tau_c, _ = get_tauc_tauH( jnp.exp(logtau), param )
         return tau_c / jnp.exp(logtau) / radiation_streaming_trigger_tau_c_over_tau - 1.0
     
-    logtau_free_stream = Bisection(optimality_fun=cond_free_stream, lower=jnp.log(tau0), upper=jnp.log(tau1), maxiter=8, check_bracket=False).run(param=param).params
+    logtau_free_stream = Bisection(optimality_fun=cond_free_stream, lower=jnp.log(tau0), upper=jnp.log(tau1), maxiter=5, check_bracket=False).run(param=param).params
 
     return jnp.exp(logtau_free_stream)
 
@@ -1325,14 +1332,41 @@ class VectorField(eqx.Module):
         return self.model(t, y, args)
     
 
+def rms_norm_filtered(x: PyTree, filter_indices: jnp.array) -> Scalar:
+    x, _ = fu.ravel_pytree(x)
+    if x.size == 0:
+        return 0
+    return _rms_norm(x[filter_indices])
+
+
+@jax.custom_jvp
+def _rms_norm(x):
+    x_sq = jnp.real(x * jnp.conj(x))
+    return jnp.sqrt(jnp.mean(x_sq))
+
+
+@_rms_norm.defjvp
+def _rms_norm_jvp(x, tx):
+    (x,) = x
+    (tx,) = tx
+    out = _rms_norm(x)
+    # Get zero gradient, rather than NaN gradient, in these cases
+    pred = (out == 0) | jnp.isinf(out)
+    numerator = jnp.where(pred, 0, x)
+    denominator = jnp.where(pred, 1, out * x.size)
+    t_out = jnp.dot(numerator / denominator, tx)
+    return out, t_out
+    
+
 @partial(jax.jit, static_argnames=('lmaxg', 'lmaxgp', 'lmaxr', 'lmaxnu', 'nqmax'))
 def evolve_one_mode( *, tau_max, tau_out, param, kmode, 
-                        lmaxg : int = 12, lmaxgp : int = 12, lmaxr : int = 17, lmaxnu : int = 17, \
-                        nqmax : int = 15, rtol: float = 1e-3, atol: float = 1e-4 ):
+                        lmaxg : int, lmaxgp : int, lmaxr : int, lmaxnu : int, \
+                        nqmax : int, rtol: float, atol: float,
+                        pcoeff : float, icoeff : float, dcoeff : float, factormax : float, factormin : float  ):
     
     nu_fluid_trigger_tau_over_tau_k            = 31.0   # value taken from default CLASS settings
     radiation_streaming_trigger_tau_c_over_tau = 5.0    # value taken from CLASS
-    radiation_streaming_trigger_tau_over_tau_k = 45.    # value taken from CLASS
+    radiation_streaming_trigger_tau_over_tau_k = 45. #45.    # value taken from CLASS
 
     # ... wrapper for model1: synchronous gauge without any optimizations, effectively this is Ma & Bertschinger 1995 
     # ... plus CLASS tight coupling approximation (Blas, Lesgourgues & Tram 2011, CLASS II)
@@ -1356,10 +1390,10 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
     nvar   = 7 + (lmaxg + 1) + (lmaxgp + 1) + (lmaxr + 1) + nqmax * (lmaxnu + 1) + 2
 
     # ... determine starting time
-    tau_start = 0.01
-    # tau_start = determine_starting_time( param=param, k=kmode )
+    # tau_start = 0.01
+    tau_start = determine_starting_time( param=param, k=kmode )
     # # tau_start = jnp.minimum( param['tau_of_a_spline'].evaluate(0.01), tau_start )
-    # tau_start = jnp.minimum( jnp.min(tau_out), tau_start )
+    tau_start = jnp.minimum( jnp.min(tau_out), tau_start )
 
     # ... set adiabatic ICs
     y0 = adiabatic_ics_one_mode( tau=tau_start, param=param, kmode=kmode, nvar=nvar, 
@@ -1373,7 +1407,7 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
     # determine time to apply free streaming approximation. if tau_free_stream < tau_neutrino_cfa, then don't use free streaming approximation
     tau_free_stream = determine_free_streaming_time( param=param, k=kmode,  radiation_streaming_trigger_tau_c_over_tau=radiation_streaming_trigger_tau_c_over_tau)
     tau_free_stream = jnp.minimum( jnp.maximum( tau_free_stream, radiation_streaming_trigger_tau_over_tau_k/kmode ), tau_max )
-    tau_free_stream = jax.lax.cond( tau_free_stream > tau_neutrino_cfa, lambda x: tau_free_stream, lambda x: x, tau_max)
+    # tau_free_stream = jax.lax.cond( tau_free_stream > tau_neutrino_cfa, lambda x: tau_free_stream, lambda x: x, tau_max)
     
     # create solver wrapper, we use the Kvaerno5 solver, which is a 5th order implicit solver
     def DEsolve( *, model, t0, t1, y0, saveat ):
@@ -1382,10 +1416,12 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
             solver=drx.Kvaerno5(),
             t0=t0,
             t1=t1,
-            dt0=jnp.minimum(t0/2, 0.5*(t1-t0)),
+            dt0=jnp.minimum(t0/4, 0.5*(t1-t0)),
             y0=y0,
             saveat=saveat,  
-            stepsize_controller = drx.PIDController(rtol=rtol, atol=atol, pcoeff=0.1, icoeff=1.0, dcoeff=0.0),
+            # stepsize_controller = drx.PIDController(rtol=rtol, atol=atol, norm=lambda t:rms_norm_filtered(t,jnp.array([0,2,3,5,6]))), #pcoeff=0.0, icoeff=1.0, dcoeff=0.0, factormax=10., factormin=0.1),
+            stepsize_controller = drx.PIDController(rtol=rtol, atol=atol, norm=lambda t:rms_norm_filtered(t,jnp.array([0,2,3,5,6,7])), 
+                                                    pcoeff=pcoeff, icoeff=icoeff, dcoeff=dcoeff, factormax=factormax, factormin=factormin),
             # default controller has icoeff=1, pcoeff=0, dcoeff=0
             max_steps=4096*4,
             args=(param, kmode, ),
@@ -1394,7 +1430,7 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
         )
 
 
-    if True:
+    if False:
 
         # solve before neutrinos become fluid
         saveat1 = drx.SaveAt(ts= jnp.where(tau_out<tau_neutrino_cfa,tau_out,tau_neutrino_cfa) )
@@ -1412,6 +1448,13 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
             in_axes=0, out_axes=0 )( sol1.ts, yin=sol1.ys )
         
         return jnp.where( tau_out[:,None]<tau_neutrino_cfa, y1_converted, sol2.ys )
+
+    elif False:
+        # solve before neutrinos become fluid
+        saveat = drx.SaveAt(ts=tau_out)
+        sol = DEsolve( model=model1, t0=tau_start, t1=tau_max, y0=y0, saveat=saveat )
+        return sol.ys
+
 
     else:
 
@@ -1453,8 +1496,9 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
 
 
 def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k : int, \
-                         lmaxg : int = 12, lmaxgp : int = 12, lmaxr : int = 17, lmaxnu : int = 17, \
-                         nqmax : int = 15, rtol: float = 1e-3, atol: float = 1e-3 ):
+                         lmaxg : int = 11, lmaxgp : int = 11, lmaxr : int = 11, lmaxnu : int = 17, \
+                         nqmax : int = 15, rtol: float = 1e-4, atol: float = 1e-4,
+                         pcoeff : float = 0.0, icoeff : float = 1.0, dcoeff : float = 0.0, factormax : float = 10.0, factormin : float = 0.5 ):
     """evolve cosmological perturbations in the synchronous gauge
 
     Parameters
@@ -1504,7 +1548,8 @@ def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k 
     y1 = jax.vmap(
         lambda k : evolve_one_mode( tau_max=tau_max, tau_out=tau_out, 
                                     param=param, kmode=k, lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, 
-                                    lmaxnu=lmaxnu, nqmax=nqmax, rtol=rtol, atol=atol ),
+                                    lmaxnu=lmaxnu, nqmax=nqmax, rtol=rtol, atol=atol,
+                                    pcoeff=pcoeff, icoeff=icoeff, dcoeff=dcoeff, factormax=factormax, factormin=factormin ),
                                     in_axes=0
     )(kmodes)
     
