@@ -2,7 +2,6 @@ import jax
 import jax.numpy as jnp
 from pylinger_background import nu_perturb
 from functools import partial
-from jaxopt import Bisection
 import diffrax as drx
 import equinox as eqx
 
@@ -10,7 +9,7 @@ import jax.flatten_util as fu
 
 from diffrax.custom_types import Array, PyTree, Scalar
 
-@partial(jax.jit, inline=True)
+# @partial(jax.jit, inline=True)
 def compute_rho_p( a, param ):
     rhonu = param['rhonu_of_a_spline'].evaluate(a)
     pnu = param['pnu_of_a_spline'].evaluate( a ) 
@@ -1242,6 +1241,32 @@ def adiabatic_ics_one_mode( *, tau: float, param, kmode, nvar, lmaxg, lmaxgp, lm
     
     return y
 
+def root_find_bisect( *, func, xleft, xright, numit, param ):
+    """
+    Simple bisection routine for root finding.
+    
+    Parameters
+    ----------
+    func : function
+        Function to be evaluated.
+    xleft : float
+        Left boundary of the interval.
+    xright : float
+        Right boundary of the interval.
+    numit : int
+        Number of iterations.
+
+    Returns
+    -------
+    x0 : float
+        Approximation to the root, given by the midpoint of the final interval.
+
+    """
+    for i in range(numit):
+        xmid = 0.5 * (xleft + xright)
+        xleft, xright = jax.lax.cond(func(xmid, param) * func(xleft, param) > 0, lambda x : (xmid, xright), lambda x : (xleft, xmid), None )
+    return 0.5 * (xleft + xright)
+
 
 def determine_starting_time( *, param, k ):
     # ADOPTED from CLASS:
@@ -1258,11 +1283,10 @@ def determine_starting_time( *, param, k ):
 
     tau0 = param['taumin']
     tau1 = param['tau_of_a_spline'].evaluate( 0.1 ) # don't start after a=0.1
-    akthom = 2.3048e-9 * (1.0 - param['YHe']) * param['Omegab'] * param['H0']**2
-
     tau_k = 1.0/k
 
     def get_tauc_tauH( tau, param ):
+        akthom = 2.3048e-9 * (1.0 - param['YHe']) * param['Omegab'] * param['H0']**2
         xe = param['xe_of_tau_spline'].evaluate( tau )
         a = param['a_of_tau_spline'].evaluate( tau )
         opac = xe * akthom / a**2
@@ -1271,7 +1295,8 @@ def determine_starting_time( *, param, k ):
 
         aprimeoa = jnp.sqrt( grho / 3.0 )
         return 1.0/opac, 1.0/aprimeoa
-
+    
+    
     def get_tauH( tau, param ):
         a = param['a_of_tau_spline'].evaluate( tau )
 
@@ -1282,18 +1307,20 @@ def determine_starting_time( *, param, k ):
 
     # condition for small k: tau_c(a) / tau_H(a) < start_small_k_at_tau_c_over_tau_h
     def cond_small_k( logtau, param ):
-        tau_c, tau_H = get_tauc_tauH( jnp.exp(logtau), param )
+        tau_c, tau_H = get_tauc_tauH( jnp.exp(logtau), param[0] )
         # adotoa/opac > start_small_k_at_tau_c_over_tau_h
+        start_small_k_at_tau_c_over_tau_h = param[1]
         return tau_c/tau_H/start_small_k_at_tau_c_over_tau_h - 1.0
 
     # condition for large k: tau_H(a) / tau_k < start_large_k_at_tau_k_over_tau_h
     def cond_large_k( logtau, param ):
-        tau_H = get_tauH( jnp.exp(logtau), param )
+        tau_H = get_tauH( jnp.exp(logtau), param[0] )
+        tau_k = param[2]
+        start_large_k_at_tau_h_over_tau_k = param[1]
         return tau_H/tau_k/start_large_k_at_tau_h_over_tau_k - 1.0
 
-    
-    logtau_small_k =  Bisection(optimality_fun=cond_small_k, lower=jnp.log(tau0), upper=jnp.log(tau1), maxiter=6, check_bracket=False).run(param=param).params
-    logtau_large_k =  Bisection(optimality_fun=cond_large_k, lower=jnp.log(tau0), upper=jnp.log(tau1), maxiter=6, check_bracket=False).run(param=param).params
+    logtau_large_k = root_find_bisect(func=cond_large_k, xleft=jnp.log(tau0), xright=jnp.log(tau1), numit=6, param=(param,start_large_k_at_tau_h_over_tau_k,tau_k) )
+    logtau_small_k = root_find_bisect(func=cond_small_k, xleft=jnp.log(tau0), xright=jnp.log(tau1), numit=6, param=(param,start_small_k_at_tau_c_over_tau_h) )
 
     return jnp.exp(jnp.minimum(logtau_small_k, logtau_large_k))
 
@@ -1301,11 +1328,10 @@ def determine_free_streaming_time( *, param, k, radiation_streaming_trigger_tau_
 
     tau0 = param['taumin']
     tau1 = param['tau_of_a_spline'].evaluate( 1e-2 ) # don't start after a=0.01
-    akthom = 2.3048e-9 * (1.0 - param['YHe']) * param['Omegab'] * param['H0']**2
-
     tau_k = 1.0/k
 
     def get_tauc_tauH( tau, param ):
+        akthom = 2.3048e-9 * (1.0 - param['YHe']) * param['Omegab'] * param['H0']**2
         xe = param['xe_of_tau_spline'].evaluate( tau )
         a = param['a_of_tau_spline'].evaluate( tau )
         opac = xe * akthom / a**2
@@ -1316,10 +1342,11 @@ def determine_free_streaming_time( *, param, k, radiation_streaming_trigger_tau_
         return 1.0/opac, 1.0/aprimeoa
 
     def cond_free_stream( logtau, param ):
-        tau_c, _ = get_tauc_tauH( jnp.exp(logtau), param )
+        tau_c, _ = get_tauc_tauH( jnp.exp(logtau), param[0] )
+        radiation_streaming_trigger_tau_c_over_tau = param[1]
         return tau_c / jnp.exp(logtau) / radiation_streaming_trigger_tau_c_over_tau - 1.0
     
-    logtau_free_stream = Bisection(optimality_fun=cond_free_stream, lower=jnp.log(tau0), upper=jnp.log(tau1), maxiter=5, check_bracket=False).run(param=param).params
+    logtau_free_stream = root_find_bisect(func=cond_free_stream, xleft=jnp.log(tau0), xright=jnp.log(tau1), numit=6, param=(param,radiation_streaming_trigger_tau_c_over_tau))
 
     return jnp.exp(logtau_free_stream)
 
