@@ -1070,7 +1070,7 @@ def adiabatic_ics_one_mode( *, tau: float, param, kmode, nvar, lmaxg, lmaxgp, lm
     y = jnp.zeros((nvar))
     a = param['a_of_tau_spline'].evaluate(tau)
 
-    if True:
+    if False:
 
         def get_class_deltag():
             rhom  = param['grhom'] * param['Omegam'] / a**3
@@ -1273,13 +1273,13 @@ def determine_starting_time( *, param, k ):
     # largest wavelengths start being sampled when universe is sufficiently opaque. This is quantified in terms of the ratio of thermo to hubble time scales, 
     # \f$ \tau_c/\tau_H \f$. Start when start_largek_at_tau_c_over_tau_h equals this ratio. Decrease this value to start integrating the wavenumbers earlier 
     # in time.
-    start_small_k_at_tau_c_over_tau_h = 0.0015 / 200. 
+    start_small_k_at_tau_c_over_tau_h =  0.0015 #0.0004 #0.0015 #/ 200. 
 
     # ADOPTED from CLASS:
     #  largest wavelengths start being sampled when mode is sufficiently outside Hubble scale. This is quantified in terms of the ratio of hubble time scale 
     #  to wavenumber time scale, \f$ \tau_h/\tau_k \f$ which is roughly equal to (k*tau). Start when this ratio equals start_large_k_at_tau_k_over_tau_h. 
     #  Decrease this value to start integrating the wavenumbers earlier in time. 
-    start_large_k_at_tau_h_over_tau_k = 0.07
+    start_large_k_at_tau_h_over_tau_k = 0.07 #0.05
 
     tau0 = param['taumin']
     tau1 = param['tau_of_a_spline'].evaluate( 0.1 ) # don't start after a=0.1
@@ -1319,16 +1319,16 @@ def determine_starting_time( *, param, k ):
         start_large_k_at_tau_h_over_tau_k = param[1]
         return tau_H/tau_k/start_large_k_at_tau_h_over_tau_k - 1.0
 
-    logtau_large_k = root_find_bisect(func=cond_large_k, xleft=jnp.log(tau0), xright=jnp.log(tau1), numit=6, param=(param,start_large_k_at_tau_h_over_tau_k,tau_k) )
-    logtau_small_k = root_find_bisect(func=cond_small_k, xleft=jnp.log(tau0), xright=jnp.log(tau1), numit=6, param=(param,start_small_k_at_tau_c_over_tau_h) )
+    logtau_large_k = root_find_bisect(func=cond_large_k, xleft=jnp.log(tau0), xright=jnp.log(tau1), numit=7, param=(param,start_large_k_at_tau_h_over_tau_k,tau_k) )
+    logtau_small_k = root_find_bisect(func=cond_small_k, xleft=jnp.log(tau0), xright=jnp.log(tau1), numit=7, param=(param,start_small_k_at_tau_c_over_tau_h) )
 
     return jnp.exp(jnp.minimum(logtau_small_k, logtau_large_k))
 
 def determine_free_streaming_time( *, param, k, radiation_streaming_trigger_tau_c_over_tau ):
 
     tau0 = param['taumin']
-    tau1 = param['tau_of_a_spline'].evaluate( 1e-2 ) # don't start after a=0.01
-    tau_k = 1.0/k
+    tau1 = param['tau_of_a_spline'].evaluate( 1.0 ) 
+    # tau_k = 1.0/k
 
     def get_tauc_tauH( tau, param ):
         akthom = 2.3048e-9 * (1.0 - param['YHe']) * param['Omegab'] * param['H0']**2
@@ -1346,7 +1346,7 @@ def determine_free_streaming_time( *, param, k, radiation_streaming_trigger_tau_
         radiation_streaming_trigger_tau_c_over_tau = param[1]
         return tau_c / jnp.exp(logtau) / radiation_streaming_trigger_tau_c_over_tau - 1.0
     
-    logtau_free_stream = root_find_bisect(func=cond_free_stream, xleft=jnp.log(tau0), xright=jnp.log(tau1), numit=6, param=(param,radiation_streaming_trigger_tau_c_over_tau))
+    logtau_free_stream = root_find_bisect(func=cond_free_stream, xleft=jnp.log(tau0), xright=jnp.log(tau1), numit=7, param=(param,radiation_streaming_trigger_tau_c_over_tau))
 
     return jnp.exp(logtau_free_stream)
 
@@ -1447,7 +1447,7 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
             y0=y0,
             saveat=saveat,  
             # stepsize_controller = drx.PIDController(rtol=rtol, atol=atol, norm=lambda t:rms_norm_filtered(t,jnp.array([0,2,3,5,6]))), #pcoeff=0.0, icoeff=1.0, dcoeff=0.0, factormax=10., factormin=0.1),
-            stepsize_controller = drx.PIDController(rtol=rtol, atol=atol, norm=lambda t:rms_norm_filtered(t,jnp.array([0,2,3,5,6,7])), 
+            stepsize_controller = drx.PIDController(rtol=rtol, atol=atol, norm=lambda t:rms_norm_filtered(t,jnp.array([0,1,2,3,5,6,7])), 
                                                     pcoeff=pcoeff, icoeff=icoeff, dcoeff=dcoeff, factormax=factormax, factormin=factormin),
             # default controller has icoeff=1, pcoeff=0, dcoeff=0
             max_steps=4096*4,
@@ -1525,7 +1525,7 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
 def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k : int, \
                          lmaxg : int = 11, lmaxgp : int = 11, lmaxr : int = 11, lmaxnu : int = 17, \
                          nqmax : int = 15, rtol: float = 1e-4, atol: float = 1e-4,
-                         pcoeff : float = 0.0, icoeff : float = 1.0, dcoeff : float = 0.0, factormax : float = 10.0, factormin : float = 0.5 ):
+                         pcoeff : float = 0.25, icoeff : float = 0.60, dcoeff : float = 0.0, factormax : float = 20.0, factormin : float = 0.3 ):
     """evolve cosmological perturbations in the synchronous gauge
 
     Parameters
