@@ -87,6 +87,8 @@ def compute_fields_RSA( *, k, aprimeoa, hprime, eta, deltab, thetab, cs2_b, tau_
 
     return deltag, thetag, shearg, deltar, thetar, shearr 
 
+
+@partial(jax.jit, static_argnames=('lmaxg', 'lmaxgp', 'lmaxr', 'lmaxnu', 'nqmax', 'do_neutrino_cfa', 'do_relativistic_sa'))
 def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, nqmax, 
                       do_neutrino_cfa : bool, do_relativistic_sa: bool):     
     """Solve the synchronous gauge perturbation equations for a single mode.
@@ -132,17 +134,24 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
     iq4 = iq3 + nqmax
 
 
-    Omegac = param['Omegam'] - param['Omegab']
+    Omegab  = param['Omegab']
+    Omegac  = param['Omegam'] - Omegab
+    OmegaDE = param['OmegaDE']
+    amnu    = param['amnu']
+    grhom   = param['grhom']
+    grhog   = param['grhog']
+    grhor   = param['grhor']
+
 
     # --- evaluate background thermodynamics
-    tempb = param['tempb_of_tau_spline'].evaluate( tau )
-    cs2 = param['cs2_of_tau_spline'].evaluate( tau )
-    xe = param['xe_of_tau_spline'].evaluate( tau )
+    tempb   = param['tempb_of_tau_spline'].evaluate( tau )
+    cs2     = param['cs2_of_tau_spline'].evaluate( tau )
+    xe      = param['xe_of_tau_spline'].evaluate( tau )
     xeprime = param['xe_of_tau_spline'].derivative( tau )
 
     # ... Photon mass density over baryon mass density
     a       = y[0]
-    photbar = param['grhog'] / (param['grhom'] * param['Omegab'] * a)
+    photbar = grhog / (grhom * Omegab * a)
     pb43    = 4.0 / 3.0 * photbar
 
 
@@ -197,7 +206,7 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
 
     # ... massive neutrino thermodynamics
     if not do_neutrino_cfa:
-        drhonu, dpnu, fnu, dshearnu = nu_perturb( a, param['amnu'], y[iq0:iq1], y[iq1:iq2], y[iq2:iq3] )
+        drhonu, dpnu, fnu, dshearnu = nu_perturb( a, amnu, y[iq0:iq1], y[iq1:iq2], y[iq2:iq3] )
         dthetanu = kmode * fnu
 
     else:
@@ -230,7 +239,7 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
     aprimeprimeoa = 0.5 * (aprimeoa**2 - gpres)    # Friedmann II
 
     # ... Thomson opacity and its rate of change
-    akthom  = 2.3048e-9 * (1.0 - param['YHe']) * param['Omegab'] * param['H0']**2 # TODO: store in param
+    akthom  = 2.3048e-9 * (1.0 - param['YHe']) * Omegab * param['H0']**2 # TODO: store in param
     opac    = xe * akthom / a**2
     tauc    = 1. / opac
     taucprime = tauc * (2*aprimeoa - xeprime/xe)
@@ -243,16 +252,16 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
     w_Q_prime = - param['w_DE_a'] * aprimeoa * a
     ca2_Q     = w_Q - w_Q_prime / 3 / ((1+w_Q)+1e-6) / aprimeoa
     rhoDE     = a**(-3*(1+param['w_DE_0']+param['w_DE_a'])) * jnp.exp(3*(a-1)*param['w_DE_a'])
-    rho_plus_p_theta_Q = (1+w_Q) * rhoDE * param['grhom'] * param['OmegaDE'] * thetaq * a**2
+    rho_plus_p_theta_Q = (1+w_Q) * rhoDE * grhom * OmegaDE * thetaq * a**2
 
     # ... background scale factor evolution
     f = f.at[0].set( aprimeoa * a )
     
     # ... evaluate metric perturbations
     dgrho = (
-        param['grhom'] * (Omegac * deltac + param['Omegab'] * deltab) / a
-        + (param['grhog'] * deltag + param['grhor'] * (param['Neff'] * deltar + param['Nmnu'] * drhonu)) / a**2
-        + param['grhom'] * param['OmegaDE'] * deltaq * rhoDE * a**2
+        grhom * (Omegac * deltac + Omegab * deltab) / a
+        + (grhog * deltag + grhor * (param['Neff'] * deltar + param['Nmnu'] * drhonu)) / a**2
+        + grhom * OmegaDE * deltaq * rhoDE * a**2
     )
 
     if do_relativistic_sa:
@@ -263,19 +272,19 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
                                                                              tau_c=tauc, tau_c_prime=taucprime )
 
     dgpres = (
-        (param['grhog'] * deltag + param['grhor'] * param['Neff'] * deltar) / a**2 / 3.0 
-        + param['grhor'] * param['Nmnu'] * dpnu / a**2 
-        + (cs2_Q * param['grhom'] * param['OmegaDE'] * deltaq * rhoDE * a**2 + (cs2_Q-ca2_Q)*(3*aprimeoa * rho_plus_p_theta_Q / kmode**2)) 
+        (grhog * deltag + grhor * param['Neff'] * deltar) / a**2 / 3.0 
+        + grhor * param['Nmnu'] * dpnu / a**2 
+        + (cs2_Q * grhom * OmegaDE * deltaq * rhoDE * a**2 + (cs2_Q-ca2_Q)*(3*aprimeoa * rho_plus_p_theta_Q / kmode**2)) 
     )
     dgtheta = (
-        param['grhom'] * (Omegac * thetac + param['Omegab'] * thetab) / a
-        + 4.0 / 3.0 * (param['grhog'] * thetag + param['Neff'] * param['grhor'] * thetar) / a**2
-        + param['Nmnu'] * param['grhor'] * dthetanu / a**2
+        grhom * (Omegac * thetac + Omegab * thetab) / a
+        + 4.0 / 3.0 * (grhog * thetag + param['Neff'] * grhor * thetar) / a**2
+        + param['Nmnu'] * grhor * dthetanu / a**2
         + rho_plus_p_theta_Q
     )
     dgshear = (
-        4.0 / 3.0 * (param['grhog'] * shearg + param['Neff'] * param['grhor'] * shearr) / a**2
-        + param['Nmnu'] * param['grhor'] * dshearnu / a**2
+        4.0 / 3.0 * (grhog * shearg + param['Neff'] * grhor * shearr) / a**2
+        + param['Nmnu'] * grhor * dshearnu / a**2
     )
 
     dahprimedtau = -(dgrho + 3.0 * dgpres) * a
@@ -289,7 +298,7 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
     f = f.at[2].set( etaprime )
     
     alphaprime = -3*dgshear/(2*kmode**2) + eta - 2*aprimeoa*alpha
-    alphaprime -=  9/2 * a**2/kmode**2 * 4/3*16/45/opac * (thetag+kmode**2*alpha) * param['grhog']
+    alphaprime -=  9/2 * a**2/kmode**2 * 4/3*16/45/opac * (thetag+kmode**2*alpha) * grhog
 
     # ... cdm equations of motion, MB95 eq. (42)
     deltacprime = -thetac - 0.5 * hprime
@@ -457,7 +466,7 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
     if not do_neutrino_cfa:
         # --- Massive neutrino equations of motion, full hierarchy 
         q = jnp.arange(1, nqmax + 1) - 0.5  # so dq == 1
-        aq = a * param['amnu'] / q
+        aq = a * amnu / q
         v = 1 / jnp.sqrt(1 + aq**2)
         dlfdlq = -q / (1.0 + jnp.exp(-q))  # derivative of the Fermi-Dirac distribution
 
