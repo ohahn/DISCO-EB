@@ -13,7 +13,7 @@ from scipy.interpolate import interp1d
 
 from matplotlib import rc
 ## for Palatino and other serif fonts use:
-rc('font',**{'family':'serif','serif':['Times New Roman']})
+rc('font',**{'family':'serif','serif':['Palatino']})
 rc('text', usetex=True)
 rc('axes', titlesize=24)
 rc('axes', labelsize=20)
@@ -85,7 +85,7 @@ LambdaCDM.set({
     'output':'mPk,mTk,vTk',
     'lensing':'no',
     'P_k_max_1/Mpc': 10.0,
-    'z_max_pk':1000.0,
+    'z_max_pk':1010.0,
     # these are high precision reference settings
     'start_small_k_at_tau_c_over_tau_h' : 0.0015, #0.0004,
     'start_large_k_at_tau_h_over_tau_k' : 0.05,
@@ -151,7 +151,7 @@ print('Computing pyLinger perturbations solution...')
 y, kmodes = evolve_perturbations( param=param, kmin=kmin, kmax=kmax, num_k=nmodes, aexp_out=aexp_out, rtol=1e-3, atol=1e-3 )#, lmaxg=50, lmaxgp = 25, lmaxr = 50, lmaxnu = 50, rtol=1e-3, atol=1e-3 )
 
 start = time.time()
-y, kmodes = evolve_perturbations( param=param, kmin=kmin, kmax=kmax, num_k=nmodes, aexp_out=aexp_out, rtol=1e-3, atol=1e-4 )#, lmaxg=50, lmaxgp = 25, lmaxr = 50, lmaxnu = 50, rtol=1e-6, atol=1e-6 )
+y, kmodes = evolve_perturbations( param=param, kmin=kmin, kmax=kmax, num_k=nmodes, aexp_out=aexp_out, rtol=1e-4, atol=1e-4 )#, lmaxg=50, lmaxgp = 25, lmaxr = 50, lmaxnu = 50, rtol=1e-6, atol=1e-6 )
 print(f'Time: {time.time() - start}s')
 
 #
