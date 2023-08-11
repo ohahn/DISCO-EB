@@ -574,134 +574,52 @@ def adiabatic_ics_one_mode( *, tau: float, param, kmode, nvar, lmaxg, lmaxgp, lm
     y = jnp.zeros((nvar))
     a = param['a_of_tau_spline'].evaluate(tau)
 
-    if False:
+    # .. isentropic ("adiabatic") initial conditions
+    rhom  = param['grhom'] * param['Omegam'] / a**3
+    rhor  = (param['grhog'] + param['grhor'] * (param['Neff'] + param['Nmnu']*param['rhonu_of_a_spline'].evaluate(a))) / a**4
+    rhonu = param['grhor'] * (param['Neff'] + param['Nmnu']*param['rhonu_of_a_spline'].evaluate(a)) / a**4
 
-        def get_class_deltag():
-            rhom  = param['grhom'] * param['Omegam'] / a**3
-            rhor  = (param['grhog'] + param['grhor'] * (param['Neff'] + param['Nmnu']*param['rhonu_of_a_spline'].evaluate(a))) / a**4
-            rhonu = param['grhor'] * (param['Neff'] + param['Nmnu']*param['rhonu_of_a_spline'].evaluate(a)) / a**4
+    fracb  = param['Omegab'] / param['Omegam']
+    fracg  = param['grhog'] / rhor
+    fracnu = rhonu / rhor
 
-            fracb  = param['Omegab'] / param['Omegam']
-            fracg  = param['grhog'] / rhor
-            fracnu = rhonu / rhor
+    om    = a * rhom / jnp.sqrt(rhor)
+    
+    curvature_ini = -1.0
+    s2_squared = 1.0
 
-            om    = a * rhom / jnp.sqrt(rhor)
-            
-            curvature_ini = -1.0
-            s2_squared = 1.0
+    #... photons
+    deltag = -(kmode*tau)**2 / 3 * (1 - om * tau / 5) * curvature_ini * s2_squared
+    thetag = -(kmode*tau)**3/tau /36 * (1-3*(1+5*fracb-fracnu)/20/(1-fracnu)*om*tau) * curvature_ini * s2_squared
 
-            #... photons
-            deltag = -(kmode*tau)**2 / 3 * (1 - om * tau / 5) * curvature_ini * s2_squared
-            return deltag
+    #... baryons
+    deltab = 0.75 * deltag
+    thetab = thetag
 
-        #
-        rhonu = param['rhonu_of_a_spline'].evaluate(a)
-        # pnu = param['pnu_of_a_spline'].evaluate(a)
+    #... CDM
+    deltac = 0.75 * deltag
+    thetac = 0.0
 
-        grho, gpres = compute_rho_p( a, param )
+    #... massless neutrinos
+    deltar = deltag
+    thetar = -(kmode*tau)**4/tau/36/(4*fracnu+15) * (4*fracnu+11+12 - 3*(8*fracnu*fracnu+50*fracnu+275)/20/(2*fracnu+15)*tau*om) * curvature_ini
+    shearr = (kmode*tau)**2/(45+12*fracnu) * (3*s2_squared-1) * (1+(4*fracnu-5)/4/(2*fracnu+15)*tau*om) * curvature_ini
 
-        s = grho + gpres
+    #... massive neutrinos
+    deltan = deltar
+    thetan = thetar
+    shearn = shearr
 
-        fracnu = param['grhor'] * (param['Neff'] + param['Nmnu']) * 4.0 / 3.0 / a**2 / s
+    # ... quintessence, Ballesteros & Lesgourgues (2010, BL20), arXiv:1004.5509
+    cs2_Q  = param['cs2_DE']
+    w_Q    = param['w_DE_0'] + param['w_DE_a'] * (1.0 - a)
+    deltaq = (kmode*tau)**2 / 4 * (1+w_Q)*(4-3*cs2_Q)/(4-6*w_Q+3*cs2_Q) * curvature_ini * s2_squared # BL10 eq. 3.7
+    thetaq = (kmode*tau)**4 / tau / 4 * cs2_Q/(4-6*w_Q+3*cs2_Q) * curvature_ini * s2_squared      # BL10 eq. 3.8
 
-        # ... use yrad=rho_matter/rho_rad to correct initial conditions for matter+radiation
-        yrad = (
-            param['grhom'] * param['Omegam'] * a
-            / (param['grhog'] + param['grhor'] * (param['Neff'] + param['Nmnu'] * rhonu))
-        )
+    # metric
+    eta = curvature_ini * (1-(kmode*tau)**2/12/(15+4*fracnu)*(5+4*s2_squared*fracnu - (16*fracnu*fracnu+280*fracnu+325)/10/(2*fracnu+15)*tau*om))
 
-        # .. isentropic ("adiabatic") initial conditions
-        s2_squared = 1.0
-        psi  = -1.0
-        C    = (15.0 + 4.0 * fracnu) / 20.0 * psi
-        akt2 = (kmode * tau)**2
-        f1   = (23.0 + 4.0 * fracnu) / (15.0 + 4.0 * fracnu)
-        h    = C * akt2 * (1.0 - 0.2 * yrad)
-        
-        deltag = -2.0 / 3.0 * h * (1.0 - akt2 / 36.0)
-
-        deltag_class = get_class_deltag()
-        fac = deltag_class / deltag
-        psi *= fac
-
-        C *= fac
-        h *= fac
-
-        deltag = -2.0 / 3.0 * h * (1.0 - akt2 / 36.0)
-        thetag = -C / 18.0 * akt2 * akt2 / tau
-
-        deltar = -2.0 / 3.0 * h * (1.0 - akt2 / 36.0 * f1)
-        thetar = f1 * thetag
-        shearr = 4.0 / 15.0 * kmode**2 / s * psi * (1.0 + 7.0 / 36.0 * yrad)
-
-        deltan = deltar
-        thetan = thetar
-        shearn = shearr
-
-        deltab = 0.75 * deltag
-        thetab = thetag
-
-        deltac = -0.5 * h
-        thetac = 0.0
-
-        ahprime = 2.0 * C * kmode**2 * tau * a * (1.0 - 0.3 * yrad)
-        eta  = 2.0 * C - (5.0 + 4.0 * fracnu) / 6.0 / (15.0 + 4.0 * fracnu) * C * akt2 * (1.0 - yrad / 3.0)
-        
-
-
-        # ... quintessence, Ballesteros & Lesgourgues (2010, BL20), arXiv:1004.5509
-        cs2_Q  = param['cs2_DE']
-        w_Q    = param['w_DE_0'] + param['w_DE_a'] * (1.0 - a)
-        deltaq = -akt2 / 4 * (1+w_Q)*(4-3*cs2_Q)/(4-6*w_Q+3*cs2_Q) * psi * s2_squared # BL10 eq. 3.7
-        thetaq = -akt2**2 / tau / 4 * cs2_Q/(4-6*w_Q+3*cs2_Q) * psi * s2_squared      # BL10 eq. 3.8
-
-    else:
-        # .. isentropic ("adiabatic") initial conditions
-        rhom  = param['grhom'] * param['Omegam'] / a**3
-        rhor  = (param['grhog'] + param['grhor'] * (param['Neff'] + param['Nmnu']*param['rhonu_of_a_spline'].evaluate(a))) / a**4
-        rhonu = param['grhor'] * (param['Neff'] + param['Nmnu']*param['rhonu_of_a_spline'].evaluate(a)) / a**4
-
-        fracb  = param['Omegab'] / param['Omegam']
-        fracg  = param['grhog'] / rhor
-        fracnu = rhonu / rhor
-
-        om    = a * rhom / jnp.sqrt(rhor)
-        
-        curvature_ini = -1.0
-        s2_squared = 1.0
-
-        #... photons
-        deltag = -(kmode*tau)**2 / 3 * (1 - om * tau / 5) * curvature_ini * s2_squared
-        thetag = -(kmode*tau)**3/tau /36 * (1-3*(1+5*fracb-fracnu)/20/(1-fracnu)*om*tau) * curvature_ini * s2_squared
-
-        #... baryons
-        deltab = 0.75 * deltag
-        thetab = thetag
-
-        #... CDM
-        deltac = 0.75 * deltag
-        thetac = 0.0
-
-        #... massless neutrinos
-        deltar = deltag
-        thetar = -(kmode*tau)**4/tau/36/(4*fracnu+15) * (4*fracnu+11+12 - 3*(8*fracnu*fracnu+50*fracnu+275)/20/(2*fracnu+15)*tau*om) * curvature_ini
-        shearr = (kmode*tau)**2/(45+12*fracnu) * (3*s2_squared-1) * (1+(4*fracnu-5)/4/(2*fracnu+15)*tau*om) * curvature_ini
-
-        #... massive neutrinos
-        deltan = deltar
-        thetan = thetar
-        shearn = shearr
-
-        # ... quintessence, Ballesteros & Lesgourgues (2010, BL20), arXiv:1004.5509
-        cs2_Q  = param['cs2_DE']
-        w_Q    = param['w_DE_0'] + param['w_DE_a'] * (1.0 - a)
-        deltaq = (kmode*tau)**2 / 4 * (1+w_Q)*(4-3*cs2_Q)/(4-6*w_Q+3*cs2_Q) * curvature_ini * s2_squared # BL10 eq. 3.7
-        thetaq = (kmode*tau)**4 / tau / 4 * cs2_Q/(4-6*w_Q+3*cs2_Q) * curvature_ini * s2_squared      # BL10 eq. 3.8
-
-        # metric
-        eta = curvature_ini * (1-(kmode*tau)**2/12/(15+4*fracnu)*(5+4*s2_squared*fracnu - (16*fracnu*fracnu+280*fracnu+325)/10/(2*fracnu+15)*tau*om))
-
-        ahprime = 0.0 # will not be evolved, only constraint
+    ahprime = 0.0 # will not be evolved, only constraint
 
     # ... metric
     y = y.at[0].set( a )
