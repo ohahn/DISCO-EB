@@ -2,6 +2,27 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 
+from matplotlib import rc
+## for Palatino and other serif fonts use:
+rc('font',**{'family':'serif','serif':['Palatino']})
+rc('text', usetex=True)
+rc('axes', titlesize=24)
+rc('axes', labelsize=20)
+rc('axes', axisbelow=False)
+rc('lines',linewidth=2)
+# lines.markersize : 10
+rc('xtick', labelsize=16)
+rc('xtick.major',size=10)
+rc('xtick.minor',size=5)
+rc('xtick',direction='in')
+rc('ytick', labelsize=16)
+rc('ytick.major',size=10)
+rc('ytick.minor',size=5)
+rc('ytick',direction='in')
+rc('legend',fontsize='x-large')
+
+#################################
+
 # unfortunately autodiff currently needs double precision!
 jax.config.update("jax_enable_x64", True) 
 
@@ -15,8 +36,8 @@ YHe     = 0.248
 Omegam  = 0.3099
 Omegab  = 0.0488911
 # OmegaDE = 1.0-Omegam
-w_DE_0  = -0.99
-w_DE_a  = 0.0
+w_DE_0  = -0.999
+w_DE_a  = 0.00
 cs2_DE  = 0.99
 num_massive_neutrinos = 1
 mnu     = 0.06  #eV
@@ -28,25 +49,25 @@ n_s     = 0.96822
 
 
 # list of parameters with respect to which we take derivatives
-fieldnames = ['\\Omega_m', '\\Omega_b', 'A_s', 'n_s', 'H_0', 'T_{CMB}', 'Y_{He}', 'N_{eff}', 'm_{\\nu}', 'w_0', 'w_a', 'c_s^2']
-fiducial_cosmo_param = jnp.array([Omegam, Omegab, A_s, n_s, H0, Tcmb, YHe, Neff, mnu, w_DE_0, w_DE_a, cs2_DE])
+fieldnames = ['H_0', '\\Omega_m', '\\Omega_b', 'N_{eff}', 'm_{\\nu}', 'T_{CMB}', 'Y_{He}', 'A_s', 'n_s', 'w_0', 'w_a', 'c_s^2']
+fiducial_cosmo_param = jnp.array([H0, Omegam, Omegab, Neff, mnu, Tcmb, YHe, A_s, n_s,  w_DE_0, w_DE_a, cs2_DE])
 
 
 def Pk_of_cosmo( args ):
     """ Compute the matter (b+c) power spectrum for a given set of cosmological parameters"""
     param = {}
-    param['Omegam'] = args[0]
-    param['Omegab'] = args[1]
-    param['OmegaDE'] = 1-args[0]
+    param['Omegam'] = args[1]
+    param['Omegab'] = args[2]
+    param['OmegaDE'] = 1-args[1]
     param['Omegak'] = 0.0
-    A_s = args[2]
-    n_s = args[3]
-    param['H0'] = args[4]
+    A_s = args[7]
+    n_s = args[8]
+    param['H0'] = args[0]
     param['Tcmb'] = args[5]
     param['YHe'] = args[6]
-    param['Neff'] = args[7]
+    param['Neff'] = args[3]
     param['Nmnu'] = num_massive_neutrinos
-    param['mnu'] = args[8]
+    param['mnu'] = args[4]
     param['w_DE_0'] = args[9]
     param['w_DE_a'] = args[10]
     param['cs2_DE'] = args[11]
@@ -64,8 +85,8 @@ def Pk_of_cosmo( args ):
     lmaxnu = 17
     nqmax  = 15
 
-    rtol   = 1e-3
-    atol   = 1e-6
+    rtol   = 1e-5
+    atol   = 1e-5
 
     # Compute Perturbations
     nmodes = 256  # number of modes to compute, reduce to speed up calculation
@@ -90,19 +111,23 @@ def Pk_of_cosmo( args ):
 k  = jnp.geomspace(1e-4,1e1,256) # number of modes to compute, reduce to speed up calculation
 
 dy = jax.jacfwd(Pk_of_cosmo)(fiducial_cosmo_param)
-
+y  = Pk_of_cosmo( fiducial_cosmo_param )
 
 ## make the plot
-fig,ax = plt.subplots(4,3,sharex=True,figsize=(13,10),layout='constrained')
+plt.rcParams['axes.titley'] = 1.0    # y is in axes-relative coordinates.
+plt.rcParams['axes.titlepad'] = -20  # pad is in points...
+
+fig,ax = plt.subplots(4,3,sharex=True,figsize=(16,18),layout='constrained')
+title_bbox = dict(boxstyle="round,pad=0.3", edgecolor="none", facecolor="white", alpha=0.667)
 
 for i,ff in enumerate(fieldnames):
-    iy = i//3
-    ix = i%3
-    ax[iy,ix].semilogx(k, dy[:,i],label='$P_{b+c}$')
-    ax[iy,ix].axhline(0.0, ls=':', color='k')
-    ax[iy,ix].set_title(f'$dP(k) / d{ff}$')
+    iy = i%3
+    ix = i//3
+    ax[ix,iy].semilogx(k, dy[:,i]/y,label='$P_{b+c}$')
+    ax[ix,iy].axhline(0.0, ls=':', color='k')
+    ax[ix,iy].set_title(f'$\\mathrm{{d}} \\log P(k) / \\mathrm{{d}} {ff}$', bbox=title_bbox, fontsize=18)
     
 for a in ax[-1,:]:
-    a.set_xlabel('$k / h Mpc^{-1}$')
+    a.set_xlabel('$k / h \\mathrm{Mpc}^{-1}$')
 
 plt.savefig('derivatives.pdf')
