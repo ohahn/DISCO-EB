@@ -88,7 +88,7 @@ def compute_fields_RSA( *, k, aprimeoa, hprime, eta, deltab, thetab, cs2_b, tau_
     return deltag, thetag, shearg, deltar, thetar, shearr 
 
 def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, nqmax, 
-                      do_neutrino_cfa : bool):     
+                      do_neutrino_cfa : bool, do_relativistic_sa: bool):     
     """Solve the synchronous gauge perturbation equations for a single mode.
 
     Parameters
@@ -117,16 +117,34 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
     f : array_like
         RHS of perturbation equations
     """
-    Omegac = param['Omegam'] - param['Omegab']
-
+    y = jnp.copy(yin)
+    f = jnp.zeros_like(y)
+    
+    # some indexing convenience:
     iq0 = 10 + lmaxg + lmaxgp + lmaxr
+
+    if do_relativistic_sa:
+        iq0 = 7 
+
     iq1 = iq0 + nqmax
     iq2 = iq1 + nqmax
     iq3 = iq2 + nqmax
     iq4 = iq3 + nqmax
 
-    y = jnp.copy(yin)
-    f = jnp.zeros_like(y)
+
+    Omegac = param['Omegam'] - param['Omegab']
+
+    # --- evaluate background thermodynamics
+    tempb = param['tempb_of_tau_spline'].evaluate( tau )
+    cs2 = param['cs2_of_tau_spline'].evaluate( tau )
+    xe = param['xe_of_tau_spline'].evaluate( tau )
+    xeprime = param['xe_of_tau_spline'].derivative( tau )
+
+    # ... Photon mass density over baryon mass density
+    a       = y[0]
+    photbar = param['grhog'] / (param['grhom'] * param['Omegab'] * a)
+    pb43    = 4.0 / 3.0 * photbar
+
 
     #TODO: add curvature
     # ... curvature
@@ -145,9 +163,9 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
     s_l3 = 1.0
 
     # ... metric
-    a = y[0]
+    a       = y[0]
     ahprime = y[1]
-    eta = y[2]
+    eta     = y[2]
 
     # ... cdm
     deltac = y[3]
@@ -157,29 +175,25 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
     deltab = y[5]
     thetab = y[6]
 
-    # ... photons
-    deltag = y[7]
-    thetag = y[8]
-    shearg = y[9] / 2.0
+    # --- ultrarelativistic species
+    if not do_relativistic_sa:
+        # ... photons
+        deltag = y[7]
+        thetag = y[8]
+        shearg = y[9] / 2.0
 
-    # ... massless neutrinos
-    deltar = y[ 9 + lmaxg + lmaxgp]
-    thetar = y[10 + lmaxg + lmaxgp]
-    shearr = y[11 + lmaxg + lmaxgp] / 2.0
+        # ... massless neutrinos
+        deltar = y[ 9 + lmaxg + lmaxgp]
+        thetar = y[10 + lmaxg + lmaxgp]
+        shearr = y[11 + lmaxg + lmaxgp] / 2.0
+    else:
+        deltag = 0.0  # we set them to zero hereo and obtain them in the RSA lateronce hprime is known
+        deltar = 0.0  # 
+        
 
     # ... quintessence field
     deltaq = y[-2]
     thetaq = y[-1]
-
-    # ... evaluate thermodynamics
-    tempb = param['tempb_of_tau_spline'].evaluate( tau )
-    cs2 = param['cs2_of_tau_spline'].evaluate( tau )
-    xe = param['xe_of_tau_spline'].evaluate( tau )
-    xeprime = param['xe_of_tau_spline'].derivative( tau )
-
-    # ... Photon mass density over baryon mass density
-    photbar = param['grhog'] / (param['grhom'] * param['Omegab'] * a)
-    pb43 = 4.0 / 3.0 * photbar
 
     # ... massive neutrino thermodynamics
     if not do_neutrino_cfa:
@@ -215,10 +229,8 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
     aprimeoa = jnp.sqrt(grho / 3.0)                # Friedmann I
     aprimeprimeoa = 0.5 * (aprimeoa**2 - gpres)    # Friedmann II
 
-    # ... Thomson opacity coefficient
-    akthom = 2.3048e-9 * (1.0 - param['YHe']) * param['Omegab'] * param['H0']**2
-
-    # ... Thomson opacity
+    # ... Thomson opacity and its rate of change
+    akthom  = 2.3048e-9 * (1.0 - param['YHe']) * param['Omegab'] * param['H0']**2 # TODO: store in param
     opac    = xe * akthom / a**2
     tauc    = 1. / opac
     taucprime = tauc * (2*aprimeoa - xeprime/xe)
@@ -242,6 +254,14 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
         + (param['grhog'] * deltag + param['grhor'] * (param['Neff'] * deltar + param['Nmnu'] * drhonu)) / a**2
         + param['grhom'] * param['OmegaDE'] * deltaq * rhoDE * a**2
     )
+
+    if do_relativistic_sa:
+        hprime = (2.0 * kmode**2 * eta + dgrho) / aprimeoa
+
+        deltag, thetag, shearg, deltar, thetar, shearr = compute_fields_RSA( k=kmode, aprimeoa=aprimeoa, hprime=hprime, 
+                                                                             eta=eta, deltab=deltab, thetab=thetab, cs2_b=cs2,
+                                                                             tau_c=tauc, tau_c_prime=taucprime )
+
     dgpres = (
         (param['grhog'] * deltag + param['grhor'] * param['Neff'] * deltar) / a**2 / 3.0 
         + param['grhor'] * param['Nmnu'] * dpnu / a**2 
@@ -388,38 +408,50 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
         f = f.at[idxg+1].set( thetagprime )
         return f
     
-    # --- check if we are in the tight coupling regime -----------------------------------------------
-    tight_coupling_trigger_tau_c_over_tau_h=0.015       # value taken from CLASS
-    tight_coupling_trigger_tau_c_over_tau_k=0.010       # value taken from CLASS
-    
-    tauh = 1./aprimeoa
-    tauk = 1./kmode
-    
-    f = jax.lax.cond(
-        jnp.logical_or( tauc/tauk > tight_coupling_trigger_tau_c_over_tau_k,
-            jnp.logical_and( tauc/tauh > tight_coupling_trigger_tau_c_over_tau_h,
-                            tauc/tauk > 0.1*tight_coupling_trigger_tau_c_over_tau_k)),
-        calc_baryon_photon_uncoupled, calc_baryon_photon_tca_CLASS, f )
-    
-    # f = calc_baryon_photon_tca( f )
-    # f = calc_baryon_photon_uncoupled( f )
-    
-    
-    # --- Massless neutrino equations of motion -------------------------------------------------------
-    #.. MB95, eqs. (49)
-    idxr = 9 + lmaxg + lmaxgp
-    deltarprime = 4.0 / 3.0 * (-thetar - 0.5 * hprime)
-    f = f.at[idxr+0].set( deltarprime )
-    thetarprime = kmode**2 * (0.25 * deltar - shearr)
-    f = f.at[idxr+1].set( thetarprime )
-    shearrprime = 8./15. * (thetar + kmode**2 * alpha) - 0.6 * kmode * y[idxr+3]
-    f = f.at[idxr+2].set( shearrprime )
-    ell = jnp.arange(3, lmaxr)
-    f = f.at[idxr+ell].set( kmode / (2 * ell + 1) * (ell * y[idxr+ell-1] - (ell + 1) * y[idxr+ell+1]) )
-    
-    # ... truncate moment expansion, MB95, eq. (51) to find
-    f = f.at[idxr+lmaxr].set( kmode * y[idxr+lmaxr-1] - (lmaxr + 1) / tau * y[idxr+lmaxr] )
-    
+    if not do_relativistic_sa:
+        # --- check if we are in the tight coupling regime -----------------------------------------------
+        tight_coupling_trigger_tau_c_over_tau_h=0.015       # value taken from CLASS
+        tight_coupling_trigger_tau_c_over_tau_k=0.010       # value taken from CLASS
+        
+        tauh = 1./aprimeoa
+        tauk = 1./kmode
+        
+        f = jax.lax.cond(
+            jnp.logical_or( tauc/tauk > tight_coupling_trigger_tau_c_over_tau_k,
+                jnp.logical_and( tauc/tauh > tight_coupling_trigger_tau_c_over_tau_h,
+                                tauc/tauk > 0.1*tight_coupling_trigger_tau_c_over_tau_k)),
+            calc_baryon_photon_uncoupled, calc_baryon_photon_tca_CLASS, f )
+        
+        # f = calc_baryon_photon_tca( f )
+        # f = calc_baryon_photon_uncoupled( f )
+        
+        
+        # --- Massless neutrino equations of motion -------------------------------------------------------
+        #.. MB95, eqs. (49)
+        idxr = 9 + lmaxg + lmaxgp
+        deltarprime = 4.0 / 3.0 * (-thetar - 0.5 * hprime)
+        f = f.at[idxr+0].set( deltarprime )
+        thetarprime = kmode**2 * (0.25 * deltar - shearr)
+        f = f.at[idxr+1].set( thetarprime )
+        shearrprime = 8./15. * (thetar + kmode**2 * alpha) - 0.6 * kmode * y[idxr+3]
+        f = f.at[idxr+2].set( shearrprime )
+        ell = jnp.arange(3, lmaxr)
+        f = f.at[idxr+ell].set( kmode / (2 * ell + 1) * (ell * y[idxr+ell-1] - (ell + 1) * y[idxr+ell+1]) )
+        
+        # ... truncate moment expansion, MB95, eq. (51) to find
+        f = f.at[idxr+lmaxr].set( kmode * y[idxr+lmaxr-1] - (lmaxr + 1) / tau * y[idxr+lmaxr] )
+
+    else:
+        # === treat baryons and photons as uncoupled ================================================
+        idxb = 5
+        # --- baryon equations of motion, MB95 eqs. (66) ---------------------------------------------
+        # ... baryon density, BLT11 eq. (2.1a)
+        deltabprime = -thetab - 0.5 * hprime
+        f = f.at[idxb+0].set( deltabprime )
+        # ... baryon velocity, BLT11 eq. (2.1b)
+        thetabprime = -aprimeoa * thetab + kmode**2 * cs2 * deltab \
+                    + pb43 * opac * (thetag - thetab)
+        f = f.at[idxb+1].set( thetabprime )
 
     # --- Massive neutrino equations of motion --------------------------------------------------------
     if not do_neutrino_cfa:
@@ -477,230 +509,7 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
         -(1-3*cs2_Q)*aprimeoa*thetaq + cs2_Q/(1+w_Q) * kmode**2 * deltaq
     )
 
-    return f.flatten()
-
-
-def model_synchronous_neutrino_cfa_rsa(*, tau, yin, param, kmode):
-    """Solve the synchronous gauge perturbation equations for a single mode.
-
-    Parameters
-    ----------
-    tau : float
-        conformal time
-    yin : array_like
-        input vector of perturbations
-    param : array_like
-        dictionary of parameters and interpolated background functions
-    kmode : float
-        wavenumber of mode
-    lmaxg : int
-        maximum photon temperature hierarchy multipole
-    lmaxgp : int
-        maximum photon polarization hierarchy multipole
-    lmaxr : int
-        maximum massless neutrino hierarchy multipole
-    lmaxnu : int
-        maximum neutrino hierarchy multipole
-    nqmax : int
-        maximum number of momentum bins for massive neutrinos
-
-    Returns
-    -------
-    f : array_like
-        RHS of perturbation equations
-    """
-    Omegac = param['Omegam'] - param['Omegab']
-
-    iq0 = 7 #10 + lmaxg + lmaxgp + lmaxr
-
-    y = jnp.copy(yin)
-    f = jnp.zeros_like(y)
-
-    #TODO: add curvature
-    # ... curvature
-    K = 0
-    
-    # def cotKgen_zero_curv():
-    #     return 1.0/(kmode*tau)
-    # def cotKgen_pos_curv():
-    #     return jnp.sqrt(K)/kmode/jnp.tan(jnp.sqrt(K)*tau)
-    # def cotKgen_neg_curv():
-    #     return jnp.sqrt(-K)/kmode/jnp.tanh(jnp.sqrt(-K)*tau)
-    
-    # cotKgen = jax.lax.switch(int(1+jax.lax.sign(K)), [cotKgen_neg_curv, cotKgen_zero_curv, cotKgen_pos_curv])
-    s2_squared = 1.-3.*K/kmode**2
-    s_l2 = 1.0
-    s_l3 = 1.0
-
-    # ... metric
-    a = y[0]
-    ahprime = y[1]
-    eta = y[2]
-
-    # ... cdm
-    deltac = y[3]
-    thetac = y[4]
-
-    # ... baryons
-    deltab = y[5]
-    thetab = y[6]
-
-    # ... photons
-    # deltag = y[7]
-    # thetag = y[8]
-    # shearg = y[9] / 2.0
-
-    # ... massless neutrinos
-    # deltar = y[ 9 + lmaxg + lmaxgp]
-    # thetar = y[10 + lmaxg + lmaxgp]
-    # shearr = y[11 + lmaxg + lmaxgp] / 2.0
-    
-    # ... massive neutrinos
-    deltanu = y[iq0+0]
-    thetanu = y[iq0+1]
-    shearnu = y[iq0+2]
-
-    # ... quintessence field
-    deltaq = y[-2]
-    thetaq = y[-1]
-
-    # ... evaluate thermodynamics
-    tempb = param['tempb_of_tau_spline'].evaluate( tau )
-    cs2 = param['cs2_of_tau_spline'].evaluate( tau )
-    xe = param['xe_of_tau_spline'].evaluate( tau )
-    xeprime = param['xe_of_tau_spline'].derivative( tau )
-
-
-    # ... Photon mass density over baryon mass density
-    photbar = param['grhog'] / (param['grhom'] * param['Omegab'] * a)
-    pb43 = 4.0 / 3.0 * photbar
-
-    # ... massive neutrino thermodynamics
-    rhonu = param['rhonu_of_a_spline'].evaluate( a )
-    pnu = param['pnu_of_a_spline'].evaluate( a ) 
-    rho_plus_p_nu = rhonu+pnu
-    ppseudonu = param['ppseudonu_of_a_spline'].evaluate( a ) # pseudo pressure from CLASS IV, LT11
-    
-    w_nu = pnu / rhonu
-    ca2_nu = w_nu/3.0/(1.0+w_nu)*(5.0-ppseudonu/pnu)  # eq. (3.3) in LT11
-    ceff2_nu = ca2_nu
-    cvis2_nu = 3.*w_nu*ca2_nu # CLASS's fluid approximation eq. (3.15c) in LT11
-    cg2_nu = w_nu-w_nu/3.0/(1.0+w_nu)*(3.0*w_nu-2.0+ppseudonu/pnu) # CLASS perturbation.c:7078
-    dpnu = cg2_nu * deltanu
-    
-    # ... compute expansion rate
-    grho, gpres = compute_rho_p( a, param )
-    
-    aprimeoa = jnp.sqrt(grho / 3.0)                 # Friedmann I
-    aprimeprimeoa = 0.5 * (aprimeoa**2 - gpres)     # Friedmann II
-
-    # ... Thomson opacity coefficient
-    akthom = 2.3048e-9 * (1.0 - param['YHe']) * param['Omegab'] * param['H0']**2
-
-    # ... Thomson opacity
-    opac    = xe * akthom / a**2
-    tauc    = 1. / opac
-    taucprime = tauc * (2*aprimeoa - xeprime/xe)
-    F       = tauc / (1+pb43) #CLASS perturbations.c:10072
-    Fprime  = taucprime/(1+pb43) + tauc*pb43*aprimeoa/(1+pb43)**2 #CLASS perturbations.c:10074
-
-    # ... quintessence
-    cs2_Q     = param['cs2_DE']
-    w_Q       = param['w_DE_0'] + param['w_DE_a'] * (1.0 - a)
-    w_Q_prime = - param['w_DE_a'] * aprimeoa * a
-    ca2_Q     = w_Q - w_Q_prime / 3 / ((1+w_Q)+1e-6) / aprimeoa
-    rhoDE     = a**(-3*(1+param['w_DE_0']+param['w_DE_a'])) * jnp.exp(3*(a-1)*param['w_DE_a'])
-    rho_plus_p_theta_Q = (1+w_Q) * rhoDE * param['grhom'] * param['OmegaDE'] * thetaq * a**2
-
-
-    # ... background scale factor evolution
-    f = f.at[0].set( aprimeoa * a )
-    
-    # RSA?
-    deltag = 0.0 
-    deltar = 0.0
-
-    # ... evaluate metric perturbations
-    dgrho = (
-        param['grhom'] * (Omegac * deltac + param['Omegab'] * deltab) / a
-        + (param['grhog'] * deltag + param['grhor'] * (param['Neff'] * deltar + param['Nmnu'] * rhonu * deltanu)) / a**2
-        + param['grhom'] * param['OmegaDE'] * deltaq * rhoDE * a**2
-    )
-
-    # ... hprime is not evolved but the energy constraint
-    hprime = (2.0 * kmode**2 * eta + dgrho) / aprimeoa
-
-    deltag, thetag, shearg, deltar, thetar, shearr = compute_fields_RSA( k=kmode, aprimeoa=aprimeoa, hprime=hprime, eta=eta, deltab=deltab, thetab=thetab, cs2_b=cs2, tau_c=tauc, tau_c_prime=taucprime )
-    
-    dgpres = (
-        (param['grhog'] * deltag + param['grhor'] * param['Neff'] * deltar) / a**2 / 3.0 
-        + param['grhor'] * param['Nmnu'] * dpnu / a**2 
-        + (cs2_Q * param['grhom'] * param['OmegaDE'] * deltaq * rhoDE * a**2 + (cs2_Q-ca2_Q)*(3*aprimeoa * rho_plus_p_theta_Q / kmode**2))
-    )
-    dgtheta = (
-        param['grhom'] * (Omegac * thetac + param['Omegab'] * thetab) / a
-        + 4.0 / 3.0 * (param['grhog'] * thetag + param['Neff'] * param['grhor'] * thetar) / a**2
-        + param['Nmnu'] * param['grhor'] * rho_plus_p_nu * thetanu / a**2
-        + rho_plus_p_theta_Q
-    )
-    dgshear = (
-        4.0 / 3.0 * (param['grhog'] * shearg + param['Neff'] * param['grhor'] * shearr) / a**2
-        + param['Nmnu'] * param['grhor'] * rho_plus_p_nu * shearnu / a**2
-    )
-
-    dahprimedtau = -(dgrho + 3.0 * dgpres) * a
-    
-    f = f.at[1].set( dahprimedtau )
-
-    etaprime = 0.5 * dgtheta / kmode**2
-    alpha  = (hprime + 6.*etaprime)/2./kmode**2
-    f = f.at[2].set( etaprime )
-
-    alphaprime = -3*dgshear/(2*kmode**2) + eta - 2*aprimeoa*alpha
-    alphaprime -=  9/2 * a**2/kmode**2 * 4/3*16/45/opac * (thetag+kmode**2*alpha) * param['grhog']
-
-    # ... cdm equations of motion, MB95 eq. (42)
-    deltacprime = -thetac - 0.5 * hprime
-    f = f.at[3].set( deltacprime )
-    thetacprime = -aprimeoa * thetac  # thetac = 0 in synchronous gauge!
-    f = f.at[4].set( thetacprime )
-
-    # === treat baryons and photons as uncoupled ================================================
-    idxb = 5
-    # --- baryon equations of motion, MB95 eqs. (66) ---------------------------------------------
-    # ... baryon density, BLT11 eq. (2.1a)
-    deltabprime = -thetab - 0.5 * hprime
-    f = f.at[idxb+0].set( deltabprime )
-    # ... baryon velocity, BLT11 eq. (2.1b)
-    thetabprime = -aprimeoa * thetab + kmode**2 * cs2 * deltab \
-                + pb43 * opac * (thetag - thetab)
-    f = f.at[idxb+1].set( thetabprime )
-    
-    # --- Massive neutrino equations of motion, fluid approximation -----------------------------------
-    # LT11: CLASS IV: ncdm, Lesgourgues & Tram 2011, https://arxiv.org/abs/1104.2935
-    # LT11, eq. (3.1a)
-    deltanuprime = (1+w_nu)*(-thetanu - 0.5 * hprime) - 3 * aprimeoa * (ceff2_nu-w_nu) * deltanu
-    f = f.at[iq0+0].set( deltanuprime )
-    # LT11, eq. (3.1b)
-    thetanuprime = -aprimeoa * (1-3*ca2_nu) * thetanu + kmode**2 * (ceff2_nu/(1+w_nu) * deltanu - shearnu)
-    f = f.at[iq0+1].set( thetanuprime )
-    # LT11, eq. (3.15c)
-    sigmanuprime = -3*(1/tau + aprimeoa*(2/3 - ca2_nu - ppseudonu/pnu/3)) * shearnu \
-        + 8/3 * cvis2_nu/(1+w_nu) * s_l2 * (thetanu + 0.5*hprime)
-    f = f.at[iq0+2].set( sigmanuprime )
-
-    # ---- Quintessence equations of motion -----------------------------------------------------------
-    # ... Ballesteros & Lesgourgues (2010, BL10), arXiv:1004.5509
-    f = f.at[-2].set( # BL10, eq. (3.5)
-        -(1+w_Q) *(thetaq + 0.5 * hprime) - 3*(cs2_Q - w_Q) * aprimeoa * deltaq 
-        - 9*(1+w_Q)*(cs2_Q-ca2_Q)*aprimeoa**2/kmode**2 * thetaq
-    )
-    f = f.at[-1].set( # BL10, eq. (3.6)
-        -(1-3*cs2_Q)*aprimeoa*thetaq + cs2_Q/(1+w_Q) * kmode**2 * deltaq
-    )
-
-    return f.flatten()
-
+    return f
 
 
 def convert_to_neutrino_fluid(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, nqmax ):
@@ -1094,18 +903,22 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
     # ... plus CLASS tight coupling approximation (Blas, Lesgourgues & Tram 2011, CLASS II)
     model1_ = VectorField( 
         lambda tau, y , params : model_synchronous( tau=tau, yin=y, param=params[0], kmode=params[1],  
-                                                   lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax, do_neutrino_cfa=False ) )
+                                                   lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax, 
+                                                   do_neutrino_cfa=False, do_relativistic_sa=False ) )
     model1 = drx.ODETerm( model1_ )
     
     # ... wrapper for model2: synchronous gauge with neutrino fluid approximation, following Lesgourgues & Tram 2011 (CLASS IV)
     model2_ = VectorField( 
         lambda tau, y , params :  model_synchronous( tau=tau, yin=y, param=params[0], kmode=params[1], 
-                                                    lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax, do_neutrino_cfa=True ) )
+                                                    lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax, 
+                                                    do_neutrino_cfa=True, do_relativistic_sa=False ) )
     model2 = drx.ODETerm( model2_ )
 
     # ... wrapper for model3: synchronous gauge with neutrino fluid and free streaming approx, following Lesgourgues & Tram 2011 (CLASS IV)
     model3_ = VectorField( 
-        lambda tau, y , params :  model_synchronous_neutrino_cfa_rsa( tau=tau, yin=y, param=params[0], kmode=params[1] ) )
+        lambda tau, y , params :  model_synchronous( tau=tau, yin=y, param=params[0], kmode=params[1], 
+                                                    lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax, 
+                                                    do_neutrino_cfa=True, do_relativistic_sa=True ) )
     model3 = drx.ODETerm( model3_ )
     
     # ... determine the number of active variables (i.e. the number of equations), absent any optimizations
