@@ -185,7 +185,6 @@ def compute(*, param, nthermo: int):
         new_xe = new_xHII + 0.25 * YHe / (1.0 - YHe) * (new_xHeII + 2.0 * new_xHeIII)
 
         # ... baryon sound speed squared (over c^2)
-        # double adotoa=adot/a;
         dtbdla = -2.0 * new_tb - thomc * a2t / new_a
         barssc = barssc_raw * (1.0 - 0.75 * YHe + (1.0 - YHe) * new_xe)
         new_cs2 = barssc * new_tb * (1.0 - dtbdla / new_tb / 3.0)
