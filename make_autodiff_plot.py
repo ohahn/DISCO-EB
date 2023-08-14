@@ -99,10 +99,9 @@ def Pk_of_cosmo( args ):
                                        rtol=rtol, atol=atol )
 
     iout = -1
-    fac = 2.5
-    Pkc = fac * A_s*(kmodes/k_p)**(n_s - 1) * kmodes**(-3) * y[:,iout,3]**2 
-    Pkb = fac * A_s*(kmodes/k_p)**(n_s - 1) * kmodes**(-3) * y[:,iout,5]**2 
-    Pkm = (param['Omegam']-param['Omegab']) * Pkc + param['Omegab'] * Pkb
+    fac = 2 * jnp.pi**2 * A_s
+    Pkm = fac *(kmodes/k_p)**(n_s - 1) * kmodes**(-3) * y[:,iout,9]**2   #total matter = cdm + baryon + massive neutrino
+    # Pkbc = fac *(kmodes/k_p)**(n_s - 1) * kmodes**(-3) * y[:,iout,9]**2
     
     return Pkm
 
