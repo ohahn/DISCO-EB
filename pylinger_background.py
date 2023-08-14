@@ -7,7 +7,7 @@ import jax_cosmo.scipy.interpolate as jaxinterp
 from jax_cosmo.scipy.integrate import romb
 from functools import partial
 
-@jax.jit
+
 def nu_background( a : float, amnu: float, nq : int = 1000, qmax : float = 30.) -> tuple[float, float]:
     """ computes the neutrino density and pressure of one flavour of massive neutrinos
         in units of the mean density of one flavour of massless neutrinos
@@ -51,7 +51,7 @@ def nu_background( a : float, amnu: float, nq : int = 1000, qmax : float = 30.) 
     
     return rhonu, pnu, ppnu
 
-@jax.jit
+
 def nu_perturb( a : float, amnu: float, psi0, psi1, psi2, nq : int = 1000, qmax : float = 30.):
     """ Compute the perturbations of density, energy flux, pressure, and
         shear stress of one flavor of massive neutrinos, in units of the mean
@@ -106,7 +106,6 @@ def nu_perturb( a : float, amnu: float, psi0, psi1, psi2, nq : int = 1000, qmax 
 
 
 # @partial(jax.jit, static_argnames=("params",))
-@jax.jit
 def dtauda_(a, grhom, grhog, grhor, Omegam, OmegaDE, w_DE_0, w_DE_a, Omegak, Neff, Nmnu, rhonu_spline):
     """Derivative of conformal time with respect to scale factor"""
     rho_DE = a**(-3*(1+w_DE_0+w_DE_a)) * jnp.exp(3*(a-1)*w_DE_a)
@@ -116,12 +115,13 @@ def dtauda_(a, grhom, grhog, grhor, Omegam, OmegaDE, w_DE_0, w_DE_a, Omegak, Nef
         + grhom * Omegak * a**2
     return jnp.sqrt(3.0 / grho2)
 
-@jax.jit
-def evolve_background( *, param, rtol: float = 1e-5, atol: float = 1e-7, order: int = 5):
+
+@partial(jax.jit, static_argnames=('class_thermo',))
+def evolve_background( *, param, class_thermo = None, rtol: float = 1e-5, atol: float = 1e-7, order: int = 5):
     c2ok = 1.62581581e4 # K / eV
     amin = 1e-9
     amax = 1.01
-    num_thermo = 1024 # length of thermal history arrays
+    num_thermo = 2048 # length of thermal history arrays
 
     # mean densities
     Omegak = 0.0 #1.0 - Omegam - OmegaL
@@ -132,6 +132,10 @@ def evolve_background( *, param, rtol: float = 1e-5, atol: float = 1e-7, order: 
     param['adotrad'] = 2.8948e-7 * param['Tcmb']**2 # Hubble during radiation domination
 
     param['amnu'] = param['mnu'] * c2ok / param['Tcmb'] # conversion factor for Neutrinos masses (m_nu*c**2/(k_B*T_nu0)
+
+    if class_thermo is not None:
+        amin = jnp.min( class_thermo['scale factor a'] )
+        amax = jnp.max( class_thermo['scale factor a'] )
 
     
     # Compute the scale factor linearly spaced in log(a)
@@ -156,25 +160,42 @@ def evolve_background( *, param, rtol: float = 1e-5, atol: float = 1e-7, order: 
                                                                  param['rhonu_of_a_spline']), amin, amax )
 
 
-    # Compute the thermal history
-    th, param = pthermo.compute( param=param, nthermo=2048 )
+    if class_thermo is not None:
+        # use input CLASS thermodynamics
+        # interpolating splines for the thermal history
+        param['cs2_coeff'] = drx.backward_hermite_coefficients(ts=class_thermo['conf. time [Mpc]'][::-1], ys=class_thermo['c_b^2'][::-1])
+        param['tb_coeff']  = drx.backward_hermite_coefficients(ts=class_thermo['conf. time [Mpc]'][::-1], ys=class_thermo['Tb [K]'][::-1])
+        param['xe_coeff']  = drx.backward_hermite_coefficients(ts=class_thermo['conf. time [Mpc]'][::-1], ys=class_thermo['x_e'][::-1])
+        param['a_coeff']   = drx.backward_hermite_coefficients(ts=class_thermo['conf. time [Mpc]'][::-1], ys=class_thermo['scale factor a'][::-1])
+        param['tau_coeff'] = drx.backward_hermite_coefficients(ts=class_thermo['scale factor a'][::-1],   ys=class_thermo['conf. time [Mpc]'][::-1])
+        
+        param['cs2_of_tau_spline']   = drx.CubicInterpolation( ts=class_thermo['conf. time [Mpc]'][::-1], coeffs=param['cs2_coeff'] )
+        param['tempb_of_tau_spline'] = drx.CubicInterpolation( ts=class_thermo['conf. time [Mpc]'][::-1], coeffs=param['tb_coeff'] )
+        param['xe_of_tau_spline']    = drx.CubicInterpolation( ts=class_thermo['conf. time [Mpc]'][::-1], coeffs=param['xe_coeff'] )
+        param['a_of_tau_spline']     = drx.CubicInterpolation( ts=class_thermo['conf. time [Mpc]'][::-1], coeffs=param['a_coeff'] )
+        param['tau_of_a_spline']     = drx.CubicInterpolation( ts=class_thermo['scale factor a'][::-1],   coeffs=param['tau_coeff'] )
     
-    param['th'] = th # for debugging, otherwise no need to store
-    param['a_in_spline']         = th['a']
-    param['tau_in_spline']       = th['tau']
+    else:    
+        # Compute the thermal history
+        th, param = pthermo.compute( param=param, nthermo=2048 )
+        
+        param['th'] = th # for debugging, otherwise no need to store
+        param['a_in_spline']         = th['a']
+        param['tau_in_spline']       = th['tau']
 
-    # interpolating splines for the thermal history
-    param['cs2_coeff'] = drx.backward_hermite_coefficients(ts=th['tau'], ys=th['cs2'])
-    param['tb_coeff']  = drx.backward_hermite_coefficients(ts=th['tau'], ys=th['tb'])
-    param['xe_coeff']  = drx.backward_hermite_coefficients(ts=th['tau'], ys=th['xe'])
-    param['a_coeff']   = drx.backward_hermite_coefficients(ts=th['tau'], ys=th['a'])
-    param['tau_coeff'] = drx.backward_hermite_coefficients(ts=th['a'],   ys=th['tau'])
+        # interpolating splines for the thermal history
+        param['cs2_coeff'] = drx.backward_hermite_coefficients(ts=th['tau'], ys=th['cs2'])
+        param['tb_coeff']  = drx.backward_hermite_coefficients(ts=th['tau'], ys=th['tb'])
+        param['xe_coeff']  = drx.backward_hermite_coefficients(ts=th['tau'], ys=th['xe'])
+        param['a_coeff']   = drx.backward_hermite_coefficients(ts=th['tau'], ys=th['a'])
+        param['tau_coeff'] = drx.backward_hermite_coefficients(ts=th['a'],   ys=th['tau'])
+        
+        param['cs2_of_tau_spline']   = drx.CubicInterpolation( ts=th['tau'], coeffs=param['cs2_coeff'] )
+        param['tempb_of_tau_spline'] = drx.CubicInterpolation( ts=th['tau'], coeffs=param['tb_coeff'] )
+        param['xe_of_tau_spline']    = drx.CubicInterpolation( ts=th['tau'], coeffs=param['xe_coeff'] )
+        param['a_of_tau_spline']     = drx.CubicInterpolation( ts=th['tau'], coeffs=param['a_coeff'] )
+        param['tau_of_a_spline']     = drx.CubicInterpolation( ts=th['a'],   coeffs=param['tau_coeff'] )
     
-    param['cs2_of_tau_spline']   = drx.CubicInterpolation( ts=th['tau'], coeffs=param['cs2_coeff'] )
-    param['tempb_of_tau_spline'] = drx.CubicInterpolation( ts=th['tau'], coeffs=param['tb_coeff'] )
-    param['xe_of_tau_spline']    = drx.CubicInterpolation( ts=th['tau'], coeffs=param['xe_coeff'] )
-    param['a_of_tau_spline']     = drx.CubicInterpolation( ts=th['tau'], coeffs=param['a_coeff'] )
-    param['tau_of_a_spline']     = drx.CubicInterpolation( ts=th['a'],   coeffs=param['tau_coeff'] )
     
     return param 
         
