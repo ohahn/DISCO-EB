@@ -328,7 +328,7 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
     # ... massive neutrino thermodynamics
     if not do_neutrino_cfa:
         drhonu, dpnu, fnu, dshearnu = nu_perturb( a, amnu, y[iq0:iq1], y[iq1:iq2], y[iq2:iq3] )
-        dthetanu = kmode * fnu
+        dthetanu = kmode * fnu 
 
     else:
 
@@ -385,9 +385,10 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
         + grhom * OmegaDE * deltaq * rhoDE * a**2
     )
 
-    if do_relativistic_sa:
-        hprime = (2.0 * kmode**2 * eta + dgrho) / aprimeoa
+    # ... hprime is not evolved but the energy constraint
+    hprime = (2.0 * kmode**2 * eta + dgrho) / aprimeoa
 
+    if do_relativistic_sa:
         deltag, thetag, shearg, deltar, thetar, shearr = compute_fields_RSA( k=kmode, aprimeoa=aprimeoa, hprime=hprime, 
                                                                              eta=eta, deltab=deltab, thetab=thetab, cs2_b=cs2,
                                                                              tau_c=tauc, tau_c_prime=taucprime )
@@ -413,7 +414,6 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
     f = f.at[1].set( dahprimedtau )
 
     # ... hprime is not evolved but the energy constraint
-    hprime = (2.0 * kmode**2 * eta + dgrho) / aprimeoa
     etaprime = 0.5 * dgtheta / kmode**2
     alpha  = (hprime + 6.*etaprime)/2./kmode**2
     f = f.at[2].set( etaprime )
@@ -825,7 +825,7 @@ def determine_starting_time( *, param, k ):
     # largest wavelengths start being sampled when universe is sufficiently opaque. This is quantified in terms of the ratio of thermo to hubble time scales, 
     # \f$ \tau_c/\tau_H \f$. Start when start_largek_at_tau_c_over_tau_h equals this ratio. Decrease this value to start integrating the wavenumbers earlier 
     # in time.
-    start_small_k_at_tau_c_over_tau_h =  0.0015 #0.0004 #0.0015 #/ 200. 
+    start_small_k_at_tau_c_over_tau_h =  0.0004 
 
     # ADOPTED from CLASS:
     #  largest wavelengths start being sampled when mode is sufficiently outside Hubble scale. This is quantified in terms of the ratio of hubble time scale 
@@ -837,24 +837,32 @@ def determine_starting_time( *, param, k ):
     tau1 = param['tau_of_a_spline'].evaluate( 0.1 ) # don't start after a=0.1
     tau_k = 1.0/k
 
+    def compute_aprimeoa( a, param ):
+        # assume neutrinos fully relativistic and no DE
+        grho = (
+            param['grhom'] * param['Omegam'] / a
+            + (param['grhog'] + param['grhor'] * (param['Neff'] + param['Nmnu'])) / a**2
+        )
+        return jnp.sqrt( grho / 3.0 )
+
     def get_tauc_tauH( tau, param ):
         akthom = 2.3048e-9 * (1.0 - param['YHe']) * param['Omegab'] * param['H0']**2
         xe = param['xe_of_tau_spline'].evaluate( tau )
         a = param['a_of_tau_spline'].evaluate( tau )
         opac = xe * akthom / a**2
 
-        grho, _ = compute_rho_p( a, param )
+        # grho, _ = compute_rho_p( a, param )
 
-        aprimeoa = jnp.sqrt( grho / 3.0 )
+        aprimeoa = compute_aprimeoa( a, param ) #jnp.sqrt( grho / 3.0 )
         return 1.0/opac, 1.0/aprimeoa
     
     
     def get_tauH( tau, param ):
         a = param['a_of_tau_spline'].evaluate( tau )
 
-        grho, _ = compute_rho_p( a, param )
+        # grho, _ = compute_rho_p( a, param )
 
-        aprimeoa = jnp.sqrt( grho / 3.0 )
+        aprimeoa = compute_aprimeoa( a, param ) #jnp.sqrt( grho / 3.0 )
         return 1.0/aprimeoa
 
     # condition for small k: tau_c(a) / tau_H(a) < start_small_k_at_tau_c_over_tau_h
@@ -880,7 +888,6 @@ def determine_free_streaming_time( *, param, k, radiation_streaming_trigger_tau_
 
     tau0 = param['taumin']
     tau1 = param['tau_of_a_spline'].evaluate( 1.0 ) 
-    # tau_k = 1.0/k
 
     def get_tauc_tauH( tau, param ):
         akthom = 2.3048e-9 * (1.0 - param['YHe']) * param['Omegab'] * param['H0']**2
@@ -888,9 +895,10 @@ def determine_free_streaming_time( *, param, k, radiation_streaming_trigger_tau_
         a = param['a_of_tau_spline'].evaluate( tau )
         opac = xe * akthom / a**2
 
-        grho, _ = compute_rho_p( a, param )
-
-        aprimeoa = jnp.sqrt( grho / 3.0 )
+        # early time approx.
+        aprimeoa = jnp.sqrt( (param['grhom'] * param['Omegam'] / a
+            + (param['grhog'] + param['grhor'] * (param['Neff'] + param['Nmnu'])) / a**2) / 3.0 )
+            
         return 1.0/opac, 1.0/aprimeoa
 
     def cond_free_stream( logtau, param ):
@@ -911,11 +919,11 @@ class VectorField(eqx.Module):
         return self.model(t, y, args)
     
 
-def rms_norm_filtered(x: PyTree, filter_indices: jnp.array) -> Scalar:
+def rms_norm_filtered(x: PyTree, filter_indices: jnp.array, weights: jnp.array) -> Scalar:
     x, _ = fu.ravel_pytree(x)
     if x.size == 0:
         return 0
-    return _rms_norm(x[filter_indices])
+    return _rms_norm(x[filter_indices] * weights)
 
 
 @jax.custom_jvp
@@ -973,9 +981,8 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
     nvar   = 7 + (lmaxg + 1) + (lmaxgp + 1) + (lmaxr + 1) + nqmax * (lmaxnu + 1) + 2
 
     # ... determine starting time
-    # tau_start = determine_starting_time( param=param, k=kmode )
-    # tau_start = jnp.minimum( jnp.min(tau_out), tau_start )
-    tau_start = 0.01
+    tau_start = determine_starting_time( param=param, k=kmode )
+    tau_start = jnp.minimum( jnp.min(tau_out), tau_start )
 
     # ... set adiabatic ICs
     y0 = adiabatic_ics_one_mode( tau=tau_start, param=param, kmode=kmode, nvar=nvar, 
@@ -1001,7 +1008,7 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
             dt0=jnp.minimum(t0/4, 0.5*(t1-t0)),
             y0=y0,
             saveat=saveat,  
-            stepsize_controller = drx.PIDController(rtol=rtol, atol=atol, norm=lambda t:rms_norm_filtered(t,jnp.array([0,1,2,3,5,6,7])), 
+            stepsize_controller = drx.PIDController(rtol=rtol, atol=atol, norm=lambda t:rms_norm_filtered(t,jnp.array([0,2,3,5,6,7]), jnp.array([1,kmode**2,1,1,1/kmode**2,1])), 
                                                     pcoeff=pcoeff, icoeff=icoeff, dcoeff=dcoeff, factormax=factormax, factormin=factormin),
             # default controller has icoeff=1, pcoeff=0, dcoeff=0
             max_steps=4096*4,
