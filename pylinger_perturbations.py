@@ -145,7 +145,6 @@ def get_total_matter_fields( *, y, kmode, param ):
     delta_m = drhom / rhom
     theta_m = rho_plus_p_theta_m / rho_plus_p_m
 
-    
     # ... massive neutrinos
     rhonu = param['rhonu_of_a_spline'].evaluate( a )
     pnu = param['pnu_of_a_spline'].evaluate( a ) 
@@ -203,9 +202,15 @@ def get_total_matter_fields( *, y, kmode, param ):
     etaprime = 0.5 * dgtheta / kmode**2
 
     delta_m  += 3 * aprimeoa * theta_m / kmode**2 #+ (hprime + 6.*etaprime)/2.
-    delta_cb += 3 * aprimeoa * theta_cb / kmode**2 #+ (hprime + 6.*etaprime)/2.
+    # theta_m =
     
-    return delta_m, delta_cb
+    delta_cb += 3 * aprimeoa * theta_cb / kmode**2 #+ (hprime + 6.*etaprime)/2.
+    # theta_cb =
+
+    # TODO: return velocity fields
+    # return delta_m, theta_m, delta_cb, theta_cb
+
+    return jnp.array([delta_m, delta_cb])
 
 
 
@@ -1080,6 +1085,12 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
             in_axes=0, out_axes=0 )( sol2.ts, yin=sol2.ys )
         
         yout = jnp.select( [tau_out[:,None]<tau_neutrino_cfa, tau_out[:,None]>tau_free_stream], [y1_converted, sol3.ys], y2_converted )
+
+
+        fout = jax.vmap( lambda yin : get_total_matter_fields( y=yin, kmode=kmode, param=param ), in_axes=0, out_axes=0 )( yout )
+
+        yout = yout.at[:,9].set( fout[:,0] )
+        yout = yout.at[:,10].set( fout[:,1] )
 
         return yout
 
