@@ -87,6 +87,127 @@ def compute_fields_RSA( *, k, aprimeoa, hprime, eta, deltab, thetab, cs2_b, tau_
 
     return deltag, thetag, shearg, deltar, thetar, shearr 
 
+def get_total_matter_fields( *, y, kmode, param ):
+    Omegab  = param['Omegab']
+    Omegac  = param['Omegam'] - Omegab
+    Omegam  = param['Omegam']
+    OmegaDE = param['OmegaDE']
+    amnu    = param['amnu']
+    grhom   = param['grhom']
+    grhog   = param['grhog']
+    grhor   = param['grhor']
+    iq0     = 7
+
+    # ... metric
+    a       = y[0]
+    ahprime = y[1]
+    eta     = y[2]
+
+    # ... cdm
+    deltac = y[3]
+    thetac = y[4]
+
+    # ... baryons
+    deltab = y[5]
+    thetab = y[6]
+
+    # ... massive neutrinos
+    deltanu = y[iq0+0]
+    thetanu = y[iq0+1]
+    shearnu = y[iq0+2]
+
+    # ... quintessence field
+    deltaq = y[-2]
+    thetaq = y[-1]
+
+    grho, _ = compute_rho_p( a, param )
+    aprimeoa = jnp.sqrt(grho / 3.0)                # Friedmann I
+
+    drhom = deltac * grhom * Omegac / a**3 + deltab * grhom * Omegab / a**3
+    rhom  = grhom * Omegac / a**3 + grhom * Omegab / a**3
+
+    rho_plus_p_theta_m = thetab * grhom * Omegab / a**3 #+ grhom * Omegac * thetac
+    rho_plus_p_m = grhom * Omegam / a**3
+
+    delta_cb = drhom / rhom
+    theta_cb = rho_plus_p_theta_m / rho_plus_p_m
+
+    rhonu = param['rhonu_of_a_spline'].evaluate( a )
+    pnu   = param['pnu_of_a_spline'].evaluate( a )
+
+    drhonu = rhonu * deltanu
+    drhom +=  grhor * param['Nmnu'] * drhonu / a**4
+    rhom += grhor * param['Nmnu'] * param['rhonu_of_a_spline'].evaluate( a ) / a**4
+
+    rho_plus_p_theta_m += (rhonu + pnu) * grhor * thetanu
+    rho_plus_p_m += (rhonu + pnu) * grhor
+
+    delta_m = drhom / rhom
+    theta_m = rho_plus_p_theta_m / rho_plus_p_m
+
+    
+    # ... massive neutrinos
+    rhonu = param['rhonu_of_a_spline'].evaluate( a )
+    pnu = param['pnu_of_a_spline'].evaluate( a ) 
+    rho_plus_p_nu = rhonu+pnu
+    ppseudonu = param['ppseudonu_of_a_spline'].evaluate( a ) # pseudo pressure from CLASS IV, LT11
+    
+    w_nu = pnu / rhonu
+    ca2_nu = w_nu/3.0/(1.0+w_nu)*(5.0-ppseudonu/pnu)  # eq. (3.3) in LT11
+    ceff2_nu = ca2_nu
+    cvis2_nu = 3.*w_nu*ca2_nu # CLASS's fluid approximation eq. (3.15c) in LT11
+    cg2_nu   = w_nu-w_nu/3.0/(1.0+w_nu)*(3.0*w_nu-2.0+ppseudonu/pnu) # CLASS perturbation.c:7078
+
+    drhonu   = rhonu * deltanu
+    dpnu     = cg2_nu * deltanu
+    dthetanu = rho_plus_p_nu * thetanu
+    dshearnu = rho_plus_p_nu * shearnu
+
+    # ... quintessence thermodynamics
+    cs2_Q     = param['cs2_DE']
+    w_Q       = param['w_DE_0'] + param['w_DE_a'] * (1.0 - a)
+    w_Q_prime = - param['w_DE_a'] * aprimeoa * a
+    ca2_Q     = w_Q - w_Q_prime / 3 / ((1+w_Q)+1e-6) / aprimeoa
+    rhoDE     = a**(-3*(1+param['w_DE_0']+param['w_DE_a'])) * jnp.exp(3*(a-1)*param['w_DE_a'])
+    rho_plus_p_theta_Q = (1+w_Q) * rhoDE * grhom * OmegaDE * thetaq * a**2
+
+    # ... evaluate metric perturbations
+    dgrho = (
+        grhom * (Omegac * deltac + Omegab * deltab) / a
+        # + (grhog * deltag + grhor * (param['Neff'] * deltar + param['Nmnu'] * drhonu)) / a**2
+        + grhor * param['Nmnu'] * drhonu / a**2
+        + grhom * OmegaDE * deltaq * rhoDE * a**2
+    )
+
+    # if do_relativistic_sa:
+    #     hprime = (2.0 * kmode**2 * eta + dgrho) / aprimeoa
+
+    #     deltag, thetag, shearg, deltar, thetar, shearr = compute_fields_RSA( k=kmode, aprimeoa=aprimeoa, hprime=hprime, 
+    #                                                                          eta=eta, deltab=deltab, thetab=thetab, cs2_b=cs2,
+    #                                                                          tau_c=tauc, tau_c_prime=taucprime )
+
+    dgpres = (
+        # (grhog * deltag + grhor * param['Neff'] * deltar) / a**2 / 3.0 
+        + grhor * param['Nmnu'] * dpnu / a**2 
+        + (cs2_Q * grhom * OmegaDE * deltaq * rhoDE * a**2 + (cs2_Q-ca2_Q)*(3*aprimeoa * rho_plus_p_theta_Q / kmode**2)) 
+    )
+    dgtheta = (
+        grhom * (Omegac * thetac + Omegab * thetab) / a
+        # + 4.0 / 3.0 * (grhog * thetag + param['Neff'] * grhor * thetar) / a**2
+        + param['Nmnu'] * grhor * dthetanu / a**2
+        + rho_plus_p_theta_Q
+    )
+
+    # ... hprime is not evolved but the energy constraint
+    hprime = (2.0 * kmode**2 * eta + dgrho) / aprimeoa
+    etaprime = 0.5 * dgtheta / kmode**2
+
+    delta_m  += 3 * aprimeoa * theta_m / kmode**2 #+ (hprime + 6.*etaprime)/2.
+    delta_cb += 3 * aprimeoa * theta_cb / kmode**2 #+ (hprime + 6.*etaprime)/2.
+    
+    return delta_m, delta_cb
+
+
 
 @partial(jax.jit, static_argnames=('lmaxg', 'lmaxgp', 'lmaxr', 'lmaxnu', 'nqmax', 'do_neutrino_cfa', 'do_relativistic_sa'))
 def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, nqmax, 
@@ -207,7 +328,7 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
     # ... massive neutrino thermodynamics
     if not do_neutrino_cfa:
         drhonu, dpnu, fnu, dshearnu = nu_perturb( a, amnu, y[iq0:iq1], y[iq1:iq2], y[iq2:iq3] )
-        dthetanu = kmode * fnu
+        dthetanu = kmode * fnu 
 
     else:
 
@@ -264,9 +385,10 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
         + grhom * OmegaDE * deltaq * rhoDE * a**2
     )
 
-    if do_relativistic_sa:
-        hprime = (2.0 * kmode**2 * eta + dgrho) / aprimeoa
+    # ... hprime is not evolved but the energy constraint
+    hprime = (2.0 * kmode**2 * eta + dgrho) / aprimeoa
 
+    if do_relativistic_sa:
         deltag, thetag, shearg, deltar, thetar, shearr = compute_fields_RSA( k=kmode, aprimeoa=aprimeoa, hprime=hprime, 
                                                                              eta=eta, deltab=deltab, thetab=thetab, cs2_b=cs2,
                                                                              tau_c=tauc, tau_c_prime=taucprime )
@@ -292,7 +414,6 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
     f = f.at[1].set( dahprimedtau )
 
     # ... hprime is not evolved but the energy constraint
-    hprime = (2.0 * kmode**2 * eta + dgrho) / aprimeoa
     etaprime = 0.5 * dgtheta / kmode**2
     alpha  = (hprime + 6.*etaprime)/2./kmode**2
     f = f.at[2].set( etaprime )
@@ -704,7 +825,7 @@ def determine_starting_time( *, param, k ):
     # largest wavelengths start being sampled when universe is sufficiently opaque. This is quantified in terms of the ratio of thermo to hubble time scales, 
     # \f$ \tau_c/\tau_H \f$. Start when start_largek_at_tau_c_over_tau_h equals this ratio. Decrease this value to start integrating the wavenumbers earlier 
     # in time.
-    start_small_k_at_tau_c_over_tau_h =  0.0015 #0.0004 #0.0015 #/ 200. 
+    start_small_k_at_tau_c_over_tau_h =  0.0004 
 
     # ADOPTED from CLASS:
     #  largest wavelengths start being sampled when mode is sufficiently outside Hubble scale. This is quantified in terms of the ratio of hubble time scale 
@@ -716,24 +837,32 @@ def determine_starting_time( *, param, k ):
     tau1 = param['tau_of_a_spline'].evaluate( 0.1 ) # don't start after a=0.1
     tau_k = 1.0/k
 
+    def compute_aprimeoa( a, param ):
+        # assume neutrinos fully relativistic and no DE
+        grho = (
+            param['grhom'] * param['Omegam'] / a
+            + (param['grhog'] + param['grhor'] * (param['Neff'] + param['Nmnu'])) / a**2
+        )
+        return jnp.sqrt( grho / 3.0 )
+
     def get_tauc_tauH( tau, param ):
         akthom = 2.3048e-9 * (1.0 - param['YHe']) * param['Omegab'] * param['H0']**2
         xe = param['xe_of_tau_spline'].evaluate( tau )
         a = param['a_of_tau_spline'].evaluate( tau )
         opac = xe * akthom / a**2
 
-        grho, _ = compute_rho_p( a, param )
+        # grho, _ = compute_rho_p( a, param )
 
-        aprimeoa = jnp.sqrt( grho / 3.0 )
+        aprimeoa = compute_aprimeoa( a, param ) #jnp.sqrt( grho / 3.0 )
         return 1.0/opac, 1.0/aprimeoa
     
     
     def get_tauH( tau, param ):
         a = param['a_of_tau_spline'].evaluate( tau )
 
-        grho, _ = compute_rho_p( a, param )
+        # grho, _ = compute_rho_p( a, param )
 
-        aprimeoa = jnp.sqrt( grho / 3.0 )
+        aprimeoa = compute_aprimeoa( a, param ) #jnp.sqrt( grho / 3.0 )
         return 1.0/aprimeoa
 
     # condition for small k: tau_c(a) / tau_H(a) < start_small_k_at_tau_c_over_tau_h
@@ -759,7 +888,6 @@ def determine_free_streaming_time( *, param, k, radiation_streaming_trigger_tau_
 
     tau0 = param['taumin']
     tau1 = param['tau_of_a_spline'].evaluate( 1.0 ) 
-    # tau_k = 1.0/k
 
     def get_tauc_tauH( tau, param ):
         akthom = 2.3048e-9 * (1.0 - param['YHe']) * param['Omegab'] * param['H0']**2
@@ -767,9 +895,10 @@ def determine_free_streaming_time( *, param, k, radiation_streaming_trigger_tau_
         a = param['a_of_tau_spline'].evaluate( tau )
         opac = xe * akthom / a**2
 
-        grho, _ = compute_rho_p( a, param )
-
-        aprimeoa = jnp.sqrt( grho / 3.0 )
+        # early time approx.
+        aprimeoa = jnp.sqrt( (param['grhom'] * param['Omegam'] / a
+            + (param['grhog'] + param['grhor'] * (param['Neff'] + param['Nmnu'])) / a**2) / 3.0 )
+            
         return 1.0/opac, 1.0/aprimeoa
 
     def cond_free_stream( logtau, param ):
@@ -790,11 +919,11 @@ class VectorField(eqx.Module):
         return self.model(t, y, args)
     
 
-def rms_norm_filtered(x: PyTree, filter_indices: jnp.array) -> Scalar:
+def rms_norm_filtered(x: PyTree, filter_indices: jnp.array, weights: jnp.array) -> Scalar:
     x, _ = fu.ravel_pytree(x)
     if x.size == 0:
         return 0
-    return _rms_norm(x[filter_indices])
+    return _rms_norm(x[filter_indices] * weights)
 
 
 @jax.custom_jvp
@@ -870,7 +999,7 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
     # tau_free_stream = jax.lax.cond( tau_free_stream > tau_neutrino_cfa, lambda x: tau_free_stream, lambda x: x, tau_max)
     
     # create solver wrapper, we use the Kvaerno5 solver, which is a 5th order implicit solver
-    def DEsolve( *, model, t0, t1, y0, saveat ):
+    def DEsolve_implicit( *, model, t0, t1, y0, saveat ):
         return drx.diffeqsolve(
             terms=model,
             solver=drx.Kvaerno5(),
@@ -879,7 +1008,7 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
             dt0=jnp.minimum(t0/4, 0.5*(t1-t0)),
             y0=y0,
             saveat=saveat,  
-            stepsize_controller = drx.PIDController(rtol=rtol, atol=atol, norm=lambda t:rms_norm_filtered(t,jnp.array([0,1,2,3,5,6,7])), 
+            stepsize_controller = drx.PIDController(rtol=rtol, atol=atol, norm=lambda t:rms_norm_filtered(t,jnp.array([0,2,3,5,6,7]), jnp.array([1,kmode**2,1,1,1/kmode**2,1])), 
                                                     pcoeff=pcoeff, icoeff=icoeff, dcoeff=dcoeff, factormax=factormax, factormin=factormin),
             # default controller has icoeff=1, pcoeff=0, dcoeff=0
             max_steps=4096*4,
@@ -887,7 +1016,6 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
             # adjoint=drx.RecursiveCheckpointAdjoint(),
             adjoint=drx.DirectAdjoint(),
         )
-
 
     if False:
 
@@ -923,14 +1051,14 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
         saveat3 = drx.SaveAt(ts= jnp.where(tau_out>=tau_free_stream,tau_out,tau_free_stream) )
 
         # solve before neutrinos become fluid
-        sol1 = DEsolve( model=model1, t0=tau_start, t1=tau_neutrino_cfa, y0=y0, saveat=saveat1 )
+        sol1 = DEsolve_implicit( model=model1, t0=tau_start, t1=tau_neutrino_cfa, y0=y0, saveat=saveat1 )
         
         # convert neutrinos to fluid by integrating over the momentum bins
         y0_neutrino_cfa = convert_to_neutrino_fluid( tau=sol1.ts[-1], yin=sol1.ys[-1,:], param=param, kmode=kmode, 
                                                 lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax )
         
         # solve after neutrinos become fluid
-        sol2 = DEsolve( model=model2, t0=sol1.ts[-1], t1=tau_free_stream, y0=y0_neutrino_cfa, saveat=saveat2 )
+        sol2 = DEsolve_implicit( model=model2, t0=sol1.ts[-1], t1=tau_free_stream, y0=y0_neutrino_cfa, saveat=saveat2 )
         
         y1_converted = jax.vmap( 
             lambda tau, yin : convert_to_neutrino_fluid(tau=tau, yin=yin, param=param, kmode=kmode, lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax ), 
@@ -941,7 +1069,7 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
                                                 lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax )
         
         # solve using radiation streaming approximation
-        sol3 = DEsolve( model=model3, t0=sol2.ts[-1], t1=tau_max, y0=y1_rsa, saveat=saveat3 )
+        sol3 = DEsolve_implicit( model=model3, t0=sol2.ts[-1], t1=tau_max, y0=y1_rsa, saveat=saveat3 )
         
         y1_converted = jax.vmap(
             lambda tau, yin : convert_to_rsa(tau=tau, yin=yin, param=param, kmode=kmode, lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax ),
@@ -951,7 +1079,12 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
             lambda tau, yin : convert_to_rsa(tau=tau, yin=yin, param=param, kmode=kmode, lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax ),
             in_axes=0, out_axes=0 )( sol2.ts, yin=sol2.ys )
         
-        return jnp.select( [tau_out[:,None]<tau_neutrino_cfa, tau_out[:,None]>tau_free_stream], [y1_converted, sol3.ys], y2_converted )
+        yout = jnp.select( [tau_out[:,None]<tau_neutrino_cfa, tau_out[:,None]>tau_free_stream], [y1_converted, sol3.ys], y2_converted )
+
+        return yout
+
+
+
 
 
 def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k : int, \
