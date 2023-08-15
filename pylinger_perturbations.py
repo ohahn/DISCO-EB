@@ -1164,7 +1164,8 @@ def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k 
     return y1, kmodes
 
 
-def get_xi_from_P( k, Pk, ell=0 ):
+@partial(jax.jit, static_argnames=('N'))
+def get_xi_from_P( k : jnp.array, Pk : jnp.array, N : int, ell : int = 0 ):
     """ get the correlation function from the power spectrum  using FFTlog, cf.
         J. D. Talman (1978). JCP, 29:35-48		
         A. J. S. Hamilton (2000).  MNRAS, 312:257-284
@@ -1172,6 +1173,7 @@ def get_xi_from_P( k, Pk, ell=0 ):
     Args:
         k (array_like)   : the wavenumbers
         Pk (array_like)  : the power spectrum
+        N (int)          : length of the input vector
         ell (int)        : the multipole to compute (0,2,4,...)
 
     Returns:
@@ -1180,18 +1182,19 @@ def get_xi_from_P( k, Pk, ell=0 ):
     """
     N = len(k)
     kmin = k[0]
-    kmax = k[-1]
+    kmax = k[N-1]
 
     L = jnp.log(kmax/kmin)
 
+    # FFTlog algorithm:
     fPk = jnp.fft.rfft( Pk * k**1.5 )
 
     ki = jnp.pi * jnp.arange( N//2+1 ) / L
     zp = (1.5+ell)/2 + 1j* ki
 
     theta = jax.vmap( lambda z: jnp.imag( lngamma_complex_e( z ) ) )( zp )
-    
-    fPk = fPk * jnp.exp( 2j * (theta - j )np.log(jnp.pi) * ki)
+
+    fPk = fPk * jnp.exp( 2j * (theta - jnp.log(jnp.pi) * ki) )
 
     r  = 2*jnp.pi/k
     xi = 1j**ell * jnp.fft.irfft( fPk ) / (2*jnp.pi*r)**1.5 
