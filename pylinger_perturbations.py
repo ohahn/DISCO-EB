@@ -1,13 +1,18 @@
 import jax
 import jax.numpy as jnp
+
 from pylinger_background import nu_perturb
-from functools import partial
+from pylinger_util import lngamma_complex_e
+
+
 import diffrax as drx
+from diffrax.custom_types import Array, PyTree, Scalar
 import equinox as eqx
 
+from functools import partial
 import jax.flatten_util as fu
 
-from diffrax.custom_types import Array, PyTree, Scalar
+
 
 # @partial(jax.jit, inline=True)
 def compute_rho_p( a, param ):
@@ -1089,8 +1094,8 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
 
         fout = jax.vmap( lambda yin : get_total_matter_fields( y=yin, kmode=kmode, param=param ), in_axes=0, out_axes=0 )( yout )
 
-        yout = yout.at[:,9].set( fout[:,0] )
-        yout = yout.at[:,10].set( fout[:,1] )
+        yout = yout.at[:,9].set( fout[:,0] )   # cdm+baryon+massive neutrino
+        yout = yout.at[:,10].set( fout[:,1] )  # cdm+baryon
 
         return yout
 
@@ -1158,3 +1163,36 @@ def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k 
     
     return y1, kmodes
 
+
+def get_xi_from_P( k, Pk, ell=0 ):
+    """ get the correlation function from the power spectrum  using FFTlog, cf.
+        J. D. Talman (1978). JCP, 29:35-48		
+        A. J. S. Hamilton (2000).  MNRAS, 312:257-284
+
+    Args:
+        k (array_like)   : the wavenumbers
+        Pk (array_like)  : the power spectrum
+        ell (int)        : the multipole to compute (0,2,4,...)
+
+    Returns:
+        xi (array_like)  : the correlation function
+        r (array_like)   : the radii
+    """
+    N = len(k)
+    kmin = k[0]
+    kmax = k[-1]
+
+    L = jnp.log(kmax/kmin)
+
+    fPk = jnp.fft.rfft( Pk * k**1.5 )
+
+    ki = jnp.pi * jnp.arange( N//2+1 ) / L
+    zp = (1.5+ell)/2 + 1j* ki
+
+    theta = jax.vmap( lambda z: jnp.imag( lngamma_complex_e( z ) ) )( zp )
+    
+    fPk = fPk * jnp.exp( 2j * (theta - j )np.log(jnp.pi) * ki)
+
+    r  = 2*jnp.pi/k
+    xi = 1j**ell * jnp.fft.irfft( fPk ) / (2*jnp.pi*r)**1.5 
+    return xi[::-1], r[::-1] # reverse order since 1/k is decreasing for increasing k
