@@ -206,16 +206,13 @@ def get_total_matter_fields( *, y, kmode, param ):
     hprime = (2.0 * kmode**2 * eta + dgrho) / aprimeoa
     etaprime = 0.5 * dgtheta / kmode**2
 
-    delta_m  += 3 * aprimeoa * theta_m / kmode**2 #+ (hprime + 6.*etaprime)/2.
-    # theta_m =
+    delta_m  += 3 * aprimeoa * theta_m / kmode**2  
+    theta_m += (hprime + 6.*etaprime)/2.
     
-    delta_cb += 3 * aprimeoa * theta_cb / kmode**2 #+ (hprime + 6.*etaprime)/2.
-    # theta_cb =
+    delta_cb += 3 * aprimeoa * theta_cb / kmode**2 
+    theta_cb += (hprime + 6.*etaprime)/2.
 
-    # TODO: return velocity fields
-    # return delta_m, theta_m, delta_cb, theta_cb
-
-    return jnp.array([delta_m, delta_cb])
+    return jnp.array([delta_m, theta_m, delta_cb, theta_cb, aprimeoa])
 
 
 
@@ -1094,8 +1091,11 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
 
         fout = jax.vmap( lambda yin : get_total_matter_fields( y=yin, kmode=kmode, param=param ), in_axes=0, out_axes=0 )( yout )
 
-        yout = yout.at[:,9].set( fout[:,0] )   # cdm+baryon+massive neutrino
-        yout = yout.at[:,10].set( fout[:,1] )  # cdm+baryon
+        yout = yout.at[:,9].set( fout[:,0] )   # delta: cdm+baryon+massive neutrino
+        yout = yout.at[:,10].set( fout[:,1] / fout[:,4] )   # v: cdm+baryon+massive neutrino
+        
+        yout = yout.at[:,11].set( fout[:,2] )  # delta: cdm+baryon
+        # yout = yout.at[:,12].set( fout[:,3] / fout[:,4] )   # v: cdm+baryon+massive neutrino
 
         return yout
 
@@ -1165,7 +1165,7 @@ def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k 
 
 
 @partial(jax.jit, static_argnames=('N'))
-def get_xi_from_P( k : jnp.array, Pk : jnp.array, N : int, ell : int = 0 ):
+def get_xi_from_P( *, k : jnp.array, Pk : jnp.array, N : int, ell : int = 0 ):
     """ get the correlation function from the power spectrum  using FFTlog, cf.
         J. D. Talman (1978). JCP, 29:35-48		
         A. J. S. Hamilton (2000).  MNRAS, 312:257-284
@@ -1198,4 +1198,52 @@ def get_xi_from_P( k : jnp.array, Pk : jnp.array, N : int, ell : int = 0 ):
 
     r  = 2*jnp.pi/k
     xi = 1j**ell * jnp.fft.irfft( fPk ) / (2*jnp.pi*r)**1.5 
-    return xi[::-1], r[::-1] # reverse order since 1/k is decreasing for increasing k
+    return jnp.real(xi[::-1]), r[::-1] # reverse order since 1/k is decreasing for increasing k
+
+
+
+def power_Kaiser( *, y : jnp.array, kmodes : jnp.array, b : float, mu : float, param ):
+    """ compute the anisotropic power spectrum using the Kaiser formula
+    
+    Args:
+        y (array_like)       : input solution from the EB solver
+        kmodes (array_like)  : the list of wave numbers
+        b (float)            : linear tracer bias
+        mu (float)           : angle cosine between k and the LOS vector
+
+    Returns:
+        P(k,mu) (array_like) : anisotropic spectrum
+    """
+
+    fac = 2 * jnp.pi**2 * param['A_s']
+    deltam = jnp.sqrt(fac *(kmodes/param['k_p'])**(param['n_s'] - 1) * kmodes**(-3)) * y[:,9]
+    thetam = jnp.sqrt(fac *(kmodes/param['k_p'])**(param['n_s'] - 1) * kmodes**(-3)) * y[:,10]
+
+    return (b*deltam - mu**2 * thetam)**2, P0, P2, P4
+
+
+
+def power_multipoles( *, y : jnp.array, kmodes : jnp.array, b : float, param ):
+    """ compute the power spectrum multipoles (l=0,2,4)
+
+    Args:
+        y (array_like)       : input solution from the EB solver
+        kmodes (array_like)  : the list of wave numbers
+        b (float)            : linear bias
+
+    Returns:
+        P0 (array_like)      : monopole
+        P2 (array_like)      : quadrupole
+        P4 (array_like)      : hexadecapole
+    """
+    fac = 2 * jnp.pi**2 * param['A_s']
+    deltam = jnp.sqrt(fac *(kmodes/param['k_p'])**(param['n_s'] - 1) * kmodes**(-3)) * y[:,9]
+    thetam = jnp.sqrt(fac *(kmodes/param['k_p'])**(param['n_s'] - 1) * kmodes**(-3)) * y[:,10]
+
+    # powerspectrum multipoles
+    P0 = b**2 * deltam**2 - 2*b/3 * deltam*thetam + 1/5*thetam**2
+    P2 = -4*b/3 * deltam * thetam + 4/7 * thetam**2
+    P4 = 8/35 * thetam**2
+
+    return P0, P2, P4
+
