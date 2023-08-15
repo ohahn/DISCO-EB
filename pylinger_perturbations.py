@@ -1197,8 +1197,8 @@ def get_xi_from_P( *, k : jnp.array, Pk : jnp.array, N : int, ell : int = 0 ):
     fPk = fPk * jnp.exp( 2j * (theta - jnp.log(jnp.pi) * ki) )
 
     r  = 2*jnp.pi/k
-    xi = 1j**ell * jnp.fft.irfft( fPk ) / (2*jnp.pi*r)**1.5 
-    return jnp.real(xi[::-1]), r[::-1] # reverse order since 1/k is decreasing for increasing k
+    xi = jnp.real( 1j**ell * jnp.fft.irfft( fPk ) / (2*jnp.pi*r)**1.5 )
+    return xi[::-1], r[::-1] # reverse order since 1/k is decreasing for increasing k
 
 
 
