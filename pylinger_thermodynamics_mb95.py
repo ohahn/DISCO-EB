@@ -91,7 +91,7 @@ def ionHe(tempb: float, a: float, x0: float, x1: float, x2: float, YHe: float, H
 
 
 @partial(jax.jit, static_argnames=("nthermo",))
-def compute(*, param, nthermo: int):
+def compute_thermo(*, param, nthermo: int):
     # Output: a, adot, tau, tb, xe_raw, xe, xHeI, xHeII, cs2
     tau0    = param['taumin']
     adot0   = param['adotrad']
@@ -110,7 +110,7 @@ def compute(*, param, nthermo: int):
     Neff    = param['Neff']
     Nmnu    = param['Nmnu']
     H0      = param['H0']
-    rhonu_sp  = param['rhonu_of_a_spline']
+    logrhonu_sp  = param['logrhonu_of_loga_spline']
 
 
     thomc0 = 5.0577e-8 * Tcmb**4
@@ -142,7 +142,7 @@ def compute(*, param, nthermo: int):
         # integrate Friedmann equation using inverse trapezoidal rule.
         new_a = a + adot * dtau
 
-        rhonu = rhonu_sp.evaluate( new_a )
+        rhonu = jnp.exp(logrhonu_sp.evaluate( jnp.log(new_a) ))
         rhoDE = new_a**(-3*(1+w_DE_0+w_DE_a)) * jnp.exp(3*(new_a-1)*w_DE_a)
     
         grho = (
