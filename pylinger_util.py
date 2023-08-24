@@ -36,3 +36,9 @@ def lngamma_complex_e( z : complex ):
                       lambda zz: lngamma_lanczos_complex(zz), z )
 
 
+def softclip(x, a_min, a_max):
+    """
+    Softclip function that is strictly monotonous.
+    """
+    y = jnp.clip(x, a_min, a_max)
+    return jnp.where(x < a_min, a_min + jnp.log(jnp.abs(x - a_min) + 1) * jnp.sign(x - a_min), jnp.where(x > a_max, a_max + jnp.log(jnp.abs(x - a_max) + 1) * jnp.sign(x - a_max), y))

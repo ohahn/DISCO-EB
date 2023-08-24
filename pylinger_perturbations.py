@@ -1,7 +1,6 @@
 import jax
 import jax.numpy as jnp
 
-from pylinger_background import nu_perturb
 from pylinger_util import lngamma_complex_e
 
 
@@ -13,11 +12,63 @@ from functools import partial
 import jax.flatten_util as fu
 
 
+@partial( jax.jit, static_argnames=('nqmax0',) )
+def nu_perturb( a : float, amnu: float, psi0, psi1, psi2, nqmax0, qmax : float = 30.):
+    """ Compute the perturbations of density, energy flux, pressure, and
+        shear stress of one flavor of massive neutrinos, in units of the mean
+        density of one flavor of massless neutrinos, by integrating over 
+        momentum.
+
+    Args:
+        a (float): scale factor
+        amnu (float): neutrino mass in units of neutrino temperature (m_nu*c**2/(k_B*T_nu0).
+        psi0 (_type_): 
+        psi1 (_type_): _description_
+        psi2 (_type_): _description_
+        nq (int, optional): _description_. Defaults to 1000.
+        qmax (float, optional): _description_. Defaults to 30..
+
+    Returns:
+        _type_: drhonu, dpnu, fnu, shearnu
+    """
+    # nqmax0 = len(psi0)
+    qmax0  = nqmax0 - 0.5
+    # const = 7 * np.pi**4 / 120
+    const = 5.682196976983475
+
+    g1 = jnp.zeros((nqmax0+1))
+    g2 = jnp.zeros((nqmax0+1))
+    g3 = jnp.zeros((nqmax0+1))
+    g4 = jnp.zeros((nqmax0+1))
+    q  = (jnp.arange(1,nqmax0+1) - 0.5)  # so dq == 1
+    qq = jnp.arange(0,nqmax0+1)  # so dq == 1
+    # q.at[0].set(0.0)
+
+    aq = a * amnu / q
+    v = 1 / jnp.sqrt(1 + aq**2)
+    qdn = q**3 / (jnp.exp(q) + 1)
+    g1 = g1.at[1:].set( qdn * psi0 / v )
+    g2 = g2.at[1:].set( qdn * psi0 * v )
+    g3 = g3.at[1:].set( qdn * psi1 )
+    g4 = g4.at[1:].set( qdn * psi2 * v )
+
+    g01 = jnp.trapz(g1, qq)
+    g02 = jnp.trapz(g2, qq)
+    g03 = jnp.trapz(g3, qq)
+    g04 = jnp.trapz(g4, qq)
+
+    # Apply asymptotic corrrection for q>qmax0
+    drhonu = (g01 + g1[-1] * 2 / qmax) / const
+    dpnu = (g02 + g2[-1] * 2 / qmax) / const / 3
+    fnu = (g03 + g3[-1] * 2 / qmax) / const
+    shearnu = (g04 + g4[-1] * 2 / qmax) / const * 2 / 3
+
+    return drhonu, dpnu, fnu, shearnu
 
 # @partial(jax.jit, inline=True)
 def compute_rho_p( a, param ):
-    rhonu = param['rhonu_of_a_spline'].evaluate(a)
-    pnu = param['pnu_of_a_spline'].evaluate( a ) 
+    rhonu = jnp.exp(param['logrhonu_of_loga_spline'].evaluate(jnp.log(a)))
+    pnu = jnp.exp(param['logpnu_of_loga_spline'].evaluate( jnp.log(a) ) )
     
     rhoDE = a**(-3*(1+param['w_DE_0']+param['w_DE_a'])) * jnp.exp(3*(a-1)*param['w_DE_a'])
     wDE = param['w_DE_0'] + param['w_DE_a'] * (1-a)
@@ -137,12 +188,12 @@ def get_total_matter_fields( *, y, kmode, param ):
     delta_cb = drhom / rhom
     theta_cb = rho_plus_p_theta_m / rho_plus_p_m
 
-    rhonu = param['rhonu_of_a_spline'].evaluate( a )
-    pnu   = param['pnu_of_a_spline'].evaluate( a )
+    rhonu = jnp.exp(param['logrhonu_of_loga_spline'].evaluate( jnp.log(a) ))
+    pnu   = jnp.exp(param['logpnu_of_loga_spline'].evaluate( jnp.log(a) ))
 
     drhonu = rhonu * deltanu
     drhom +=  grhor * param['Nmnu'] * drhonu / a**4
-    rhom += grhor * param['Nmnu'] * param['rhonu_of_a_spline'].evaluate( a ) / a**4
+    rhom += grhor * param['Nmnu'] * jnp.exp(param['logrhonu_of_loga_spline'].evaluate( jnp.log(a) )) / a**4
 
     rho_plus_p_theta_m += (rhonu + pnu) * grhor * thetanu
     rho_plus_p_m += (rhonu + pnu) * grhor
@@ -151,10 +202,10 @@ def get_total_matter_fields( *, y, kmode, param ):
     theta_m = rho_plus_p_theta_m / rho_plus_p_m
 
     # ... massive neutrinos
-    rhonu = param['rhonu_of_a_spline'].evaluate( a )
-    pnu = param['pnu_of_a_spline'].evaluate( a ) 
+    rhonu = jnp.exp(param['logrhonu_of_loga_spline'].evaluate( jnp.log(a) ))
+    pnu = jnp.exp(param['logpnu_of_loga_spline'].evaluate( jnp.log(a) ))
     rho_plus_p_nu = rhonu+pnu
-    ppseudonu = param['ppseudonu_of_a_spline'].evaluate( a ) # pseudo pressure from CLASS IV, LT11
+    ppseudonu = jnp.exp(param['logppseudonu_of_loga_spline'].evaluate( jnp.log(a) )) # pseudo pressure from CLASS IV, LT11
     
     w_nu = pnu / rhonu
     ca2_nu = w_nu/3.0/(1.0+w_nu)*(5.0-ppseudonu/pnu)  # eq. (3.3) in LT11
@@ -270,15 +321,16 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
     grhog   = param['grhog']
     grhor   = param['grhor']
 
+    # --- current scale factor
+    a       = y[0]
 
     # --- evaluate background thermodynamics
-    tempb   = param['tempb_of_tau_spline'].evaluate( tau )
-    cs2     = param['cs2_of_tau_spline'].evaluate( tau )
+    tempb   = param['tempba_of_tau_spline'].evaluate( tau ) / a
+    cs2     = param['cs2a_of_tau_spline'].evaluate( tau ) / a
     xe      = param['xe_of_tau_spline'].evaluate( tau )
     xeprime = param['xe_of_tau_spline'].derivative( tau )
 
     # ... Photon mass density over baryon mass density
-    a       = y[0]
     photbar = grhog / (grhom * Omegab * a)
     pb43    = 4.0 / 3.0 * photbar
 
@@ -334,7 +386,7 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
 
     # ... massive neutrino thermodynamics
     if not do_neutrino_cfa:
-        drhonu, dpnu, fnu, dshearnu = nu_perturb( a, amnu, y[iq0:iq1], y[iq1:iq2], y[iq2:iq3] )
+        drhonu, dpnu, fnu, dshearnu = nu_perturb( a, amnu, y[iq0:iq1], y[iq1:iq2], y[iq2:iq3], nqmax0=nqmax )
         dthetanu = kmode * fnu 
 
     else:
@@ -343,10 +395,10 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
         thetanu = y[iq0+1]
         shearnu = y[iq0+2]
 
-        rhonu = param['rhonu_of_a_spline'].evaluate( a )
-        pnu = param['pnu_of_a_spline'].evaluate( a ) 
+        rhonu = jnp.exp(param['logrhonu_of_loga_spline'].evaluate( jnp.log(a) ))
+        pnu = jnp.exp(param['logpnu_of_loga_spline'].evaluate( jnp.log(a) ))
         rho_plus_p_nu = rhonu+pnu
-        ppseudonu = param['ppseudonu_of_a_spline'].evaluate( a ) # pseudo pressure from CLASS IV, LT11
+        ppseudonu = jnp.exp(param['logppseudonu_of_loga_spline'].evaluate( jnp.log(a) )) # pseudo pressure from CLASS IV, LT11
         
         w_nu = pnu / rhonu
         ca2_nu = w_nu/3.0/(1.0+w_nu)*(5.0-ppseudonu/pnu)  # eq. (3.3) in LT11
@@ -367,7 +419,8 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
     aprimeprimeoa = 0.5 * (aprimeoa**2 - gpres)    # Friedmann II
 
     # ... Thomson opacity and its rate of change
-    akthom  = 2.3048e-9 * (1.0 - param['YHe']) * Omegab * param['H0']**2 # TODO: store in param
+    # akthom = 3 H0^2/(8πG) Ωb (1-Yp) σ_T / m_H in 1/Mpc, where µ=µtoday as we multiply by xe below
+    akthom  = 2.30389309e-9 * (1.0 - param['YHe']) * Omegab * param['H0']**2 # TODO: store in param
     opac    = xe * akthom / a**2
     tauc    = 1. / opac
     taucprime = tauc * (2*aprimeoa - xeprime/xe)
@@ -592,7 +645,7 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
 
     # --- Massive neutrino equations of motion --------------------------------------------------------
     if not do_neutrino_cfa:
-        # --- Massive neutrino equations of motion, full hierarchy 
+        # --- Massive neutrino equations of motion, full hierarchy, MB95 eqs. (56) ---------------------
         q = jnp.arange(1, nqmax + 1) - 0.5  # so dq == 1
         aq = a * amnu / q
         v = 1 / jnp.sqrt(1 + aq**2)
@@ -608,17 +661,29 @@ def model_synchronous(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, n
             kmode * v * (2 * y[iq1 : iq2] - 3 * y[iq3 : iq4]) / 5.0 - (hprime / 15 + 2 / 5 * etaprime) * dlfdlq
         )
 
-        for l in range(3, lmaxnu - 1):
-            f = f.at[iq0 + l * nqmax : iq0 + (l + 1) * nqmax].set(
-                kmode * v / (2 * l + 1) * (
-                    l * y[iq0 + (l - 1) * nqmax : iq0 + (l) * nqmax]
-                    - (l + 1) * y[iq0 + (l + 1) * nqmax : iq0 + (l + 2) * nqmax]
-                )
-            )
+        ell = jnp.arange(3, lmaxnu)
+        vv = jnp.tile(v, lmaxnu - 3)
+        denl = jnp.repeat( 2*ell+1, nqmax )
+
+        f = f.at[iq0 + 3 * nqmax : iq0 + lmaxnu * nqmax].set(
+            kmode * vv / denl * (
+                jnp.repeat( ell, nqmax ) * y[iq0 + 2*nqmax : iq0 + (lmaxnu-1)*nqmax] 
+                - jnp.repeat( ell+1, nqmax ) * y[iq0 + 4*nqmax : iq0 + (lmaxnu+1)*nqmax]
+            ) 
+        )
+
+        # for l in range(3, lmaxnu):
+        #     f = f.at[iq0 + l * nqmax : iq0 + (l + 1) * nqmax].set(
+        #         kmode * v / (2 * l + 1) * (
+        #             l * y[iq0 + (l - 1) * nqmax : iq0 + (l) * nqmax]
+        #             - (l + 1) * y[iq0 + (l + 1) * nqmax : iq0 + (l + 2) * nqmax]
+        #         )
+        #     )
 
         # Truncate moment expansion.
         f = f.at[-nqmax-2 :-2].set(
-            kmode * v * y[-2 * nqmax-2: -nqmax-2] - (lmaxnu + 1) / tau * y[-nqmax-2:-2]
+            (2*lmaxnu + 1) / tau / v / kmode * y[-2 * nqmax-2: -nqmax-2] - y[-3 * nqmax-2: -2*nqmax-2] 
+            # kmode * v * y[-2 * nqmax-2: -nqmax-2] - (lmaxnu + 1) / tau * y[-nqmax-2:-2]
         )
         
     else:
@@ -660,9 +725,9 @@ def convert_to_neutrino_fluid(*, tau, yin, param, kmode, lmaxg, lmaxgp, lmaxr, l
     nvarnu = 10 + lmaxg + lmaxgp + lmaxr + 3 + 2
     y = jnp.zeros((nvarnu))
     
-    drhonu, _, fnu, shearnu = nu_perturb( a, param['amnu'], yin[iq0:iq1], yin[iq1:iq2], yin[iq2:iq3] )
-    rhonu = param['rhonu_of_a_spline'].evaluate( a )
-    pnu = param['pnu_of_a_spline'].evaluate( a ) 
+    drhonu, _, fnu, shearnu = nu_perturb( a, param['amnu'], yin[iq0:iq1], yin[iq1:iq2], yin[iq2:iq3], nqmax0=nqmax )
+    rhonu = jnp.exp(param['logrhonu_of_loga_spline'].evaluate( jnp.log(a) ))
+    pnu = jnp.exp(param['logpnu_of_loga_spline'].evaluate( jnp.log(a) ) )
     rho_plus_p = rhonu + pnu
     
     # copy over all the other variables
@@ -713,8 +778,8 @@ def adiabatic_ics_one_mode( *, tau: float, param, kmode, nvar, lmaxg, lmaxgp, lm
 
     # .. isentropic ("adiabatic") initial conditions
     rhom  = param['grhom'] * param['Omegam'] / a**3
-    rhor  = (param['grhog'] + param['grhor'] * (param['Neff'] + param['Nmnu']*param['rhonu_of_a_spline'].evaluate(a))) / a**4
-    rhonu = param['grhor'] * (param['Neff'] + param['Nmnu']*param['rhonu_of_a_spline'].evaluate(a)) / a**4
+    rhor  = (param['grhog'] + param['grhor'] * (param['Neff'] + param['Nmnu']*jnp.exp(param['logrhonu_of_loga_spline'].evaluate(jnp.log(a))))) / a**4
+    rhonu = param['grhor'] * (param['Neff'] + param['Nmnu']*jnp.exp(param['logrhonu_of_loga_spline'].evaluate(jnp.log(a)))) / a**4
 
     fracb  = param['Omegab'] / param['Omegam']
     fracg  = param['grhog'] / rhor
@@ -855,7 +920,7 @@ def determine_starting_time( *, param, k ):
     def get_tauc_tauH( tau, param ):
         akthom = 2.3048e-9 * (1.0 - param['YHe']) * param['Omegab'] * param['H0']**2
         xe = param['xe_of_tau_spline'].evaluate( tau )
-        a = param['a_of_tau_spline'].evaluate( tau )
+        a = param['a_of_tau_spline'].evaluate(tau)
         opac = xe * akthom / a**2
 
         # grho, _ = compute_rho_p( a, param )
@@ -865,7 +930,7 @@ def determine_starting_time( *, param, k ):
     
     
     def get_tauH( tau, param ):
-        a = param['a_of_tau_spline'].evaluate( tau )
+        a = param['a_of_tau_spline'].evaluate(tau)
 
         # grho, _ = compute_rho_p( a, param )
 
@@ -899,7 +964,7 @@ def determine_free_streaming_time( *, param, k, radiation_streaming_trigger_tau_
     def get_tauc_tauH( tau, param ):
         akthom = 2.3048e-9 * (1.0 - param['YHe']) * param['Omegab'] * param['H0']**2
         xe = param['xe_of_tau_spline'].evaluate( tau )
-        a = param['a_of_tau_spline'].evaluate( tau )
+        a = param['a_of_tau_spline'].evaluate(tau)
         opac = xe * akthom / a**2
 
         # early time approx.
@@ -1024,18 +1089,18 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
             adjoint=drx.DirectAdjoint(),
         )
 
-    if False:
+    if True:
 
         # solve before neutrinos become fluid
         saveat1 = drx.SaveAt(ts= jnp.where(tau_out<tau_neutrino_cfa,tau_out,tau_neutrino_cfa) )
         saveat2 = drx.SaveAt(ts= jnp.where(tau_out>=tau_neutrino_cfa,tau_out,tau_neutrino_cfa) )
 
-        sol1 = DEsolve( model=model1, t0=tau_start, t1=tau_neutrino_cfa, y0=y0, saveat=saveat1 )
+        sol1 = DEsolve_implicit( model=model1, t0=tau_start, t1=tau_neutrino_cfa, y0=y0, saveat=saveat1 )
         # convert neutrinos to fluid by integrating over the momentum bins
         y0_neutrino_cfa = convert_to_neutrino_fluid( tau=sol1.ts[-1], yin=sol1.ys[-1,:], param=param, kmode=kmode, 
                                                 lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax )
         # solve after neutrinos become fluid
-        sol2 = DEsolve( model=model2, t0=sol1.ts[-1], t1=tau_max, y0=y0_neutrino_cfa, saveat=saveat2 )
+        sol2 = DEsolve_implicit( model=model2, t0=sol1.ts[-1], t1=tau_max, y0=y0_neutrino_cfa, saveat=saveat2 )
         
         y1_converted = jax.vmap( 
             lambda tau, yin : convert_to_neutrino_fluid(tau=tau, yin=yin, param=param, kmode=kmode, lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax ), 
@@ -1046,7 +1111,7 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
     elif False:
         # solve before neutrinos become fluid
         saveat = drx.SaveAt(ts=tau_out)
-        sol = DEsolve( model=model1, t0=tau_start, t1=tau_max, y0=y0, saveat=saveat )
+        sol = DEsolve_implicit( model=model1, t0=tau_start, t1=tau_max, y0=y0, saveat=saveat )
         return sol.ys
 
 
