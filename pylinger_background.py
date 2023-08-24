@@ -45,7 +45,7 @@ def evolve_background( *, param, thermo_module = 'RECFAST', rtol: float = 1e-5, 
 
     param['amnu'] = param['mnu'] * c2ok / param['Tcmb'] # conversion factor for Neutrinos masses (m_nu*c**2/(k_B*T_nu0)
 
-    if thermo_module is 'CLASS':
+    if thermo_module == 'CLASS':
         amin = jnp.min( class_thermo['scale factor a'] )
         amax = jnp.max( class_thermo['scale factor a'] )
 
@@ -74,7 +74,7 @@ def evolve_background( *, param, thermo_module = 'RECFAST', rtol: float = 1e-5, 
 
 
     
-    if thermo_module is 'RECFAST':
+    if thermo_module == 'RECFAST':
         # Compute the thermal history
         sol, param = compute_thermo_recfast( param=param )
 
@@ -111,7 +111,7 @@ def evolve_background( *, param, thermo_module = 'RECFAST', rtol: float = 1e-5, 
         param['tempba_of_tau_spline'] = drx.CubicInterpolation( ts=tau, coeffs=param['tba_coeff'] )
 
 
-    elif thermo_module is 'MB95':
+    elif thermo_module == 'MB95':
 
         # Compute the thermal history
         th, param = compute_thermo_mb95( param=param, nthermo=num_thermo )
@@ -149,7 +149,7 @@ def evolve_background( *, param, thermo_module = 'RECFAST', rtol: float = 1e-5, 
         param['a_coeff'] = drx.backward_hermite_coefficients(ts=tau, ys=a)
         param['a_of_tau_spline'] = drx.CubicInterpolation( ts=tau, coeffs=param['a_coeff'] )
 
-    elif thermo_module is 'CLASS':
+    elif thermo_module == 'CLASS':
         # use input CLASS thermodynamics
         # interpolating splines for the thermal history
         param['cs2_coeff'] = drx.backward_hermite_coefficients(ts=class_thermo['conf. time [Mpc]'][::-1], ys=class_thermo['c_b^2'][::-1])

@@ -1089,7 +1089,7 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
             adjoint=drx.DirectAdjoint(),
         )
 
-    if True:
+    if False:
 
         # solve before neutrinos become fluid
         saveat1 = drx.SaveAt(ts= jnp.where(tau_out<tau_neutrino_cfa,tau_out,tau_neutrino_cfa) )
@@ -1267,24 +1267,31 @@ def get_xi_from_P( *, k : jnp.array, Pk : jnp.array, N : int, ell : int = 0 ):
 
 
 
-def power_Kaiser( *, y : jnp.array, kmodes : jnp.array, b : float, mu : float, param ):
+def power_Kaiser( *, y : jax.Array, kmodes : jax.Array, b : float, sigma_r : float, nmu : int, param ) -> tuple[jax.Array]:
     """ compute the anisotropic power spectrum using the Kaiser formula
     
     Args:
         y (array_like)       : input solution from the EB solver
         kmodes (array_like)  : the list of wave numbers
         b (float)            : linear tracer bias
-        mu (float)           : angle cosine between k and the LOS vector
+        sigma_r (float)      : redshift error sigma_r = sigma_r0 * (1+z)
+        nmu (int)            : number of mu bins
+        param (dict)         : dictionary of all data
 
     Returns:
         P(k,mu) (array_like) : anisotropic spectrum
+        mu (array_like)      : mu bins
+        theta (array_like)   : theta bins, mu = cos(theta)
     """
+    theta = jnp.linspace(0,2*jnp.pi,nmu)
+    mu = jnp.cos( theta )
 
     fac = 2 * jnp.pi**2 * param['A_s']
     deltam = jnp.sqrt(fac *(kmodes/param['k_p'])**(param['n_s'] - 1) * kmodes**(-3)) * y[:,9]
     thetam = jnp.sqrt(fac *(kmodes/param['k_p'])**(param['n_s'] - 1) * kmodes**(-3)) * y[:,10]
 
-    return (b*deltam - mu**2 * thetam)**2, P0, P2, P4
+    Prsd =  (b*deltam[:,None] - mu[None,:]**2 * thetam[:,None])**2 * jnp.exp( -kmodes[:,None]**2 * mu[None,:]**2 * sigma_r**2)
+    return Prsd, mu, theta
 
 
 
