@@ -1274,7 +1274,7 @@ def power_Kaiser( *, y : jax.Array, kmodes : jax.Array, b : float, sigma_r : flo
         y (array_like)       : input solution from the EB solver
         kmodes (array_like)  : the list of wave numbers
         b (float)            : linear tracer bias
-        sigma_r (float)      : redshift error sigma_r = sigma_r0 * (1+z)
+        sigma_z (float)      : redshift error sigma_z = sigma_z0 * (1+z)
         nmu (int)            : number of mu bins
         param (dict)         : dictionary of all data
 
@@ -1290,8 +1290,11 @@ def power_Kaiser( *, y : jax.Array, kmodes : jax.Array, b : float, sigma_r : flo
     deltam = jnp.sqrt(fac *(kmodes/param['k_p'])**(param['n_s'] - 1) * kmodes**(-3)) * y[:,9]
     thetam = jnp.sqrt(fac *(kmodes/param['k_p'])**(param['n_s'] - 1) * kmodes**(-3)) * y[:,10]
 
-    Prsd =  (b*deltam[:,None] - mu[None,:]**2 * thetam[:,None])**2 * jnp.exp( -kmodes[:,None]**2 * mu[None,:]**2 * sigma_r**2)
-    return Prsd, mu, theta
+    c_over_H = 299792.458 / (param['H0'])   # TODO: this needs to divided by E(z)!!
+    Fkmu = jnp.exp( -(kmodes[:,None] * c_over_H)**2 * mu[None,:]**2 * sigma_r**2 )
+
+    Pkmu =  (b*deltam[:,None] - mu[None,:]**2 * thetam[:,None])**2 * Fkmu
+    return Pkmu, mu, theta
 
 
 
