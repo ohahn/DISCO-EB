@@ -1267,7 +1267,7 @@ def get_xi_from_P( *, k : jnp.array, Pk : jnp.array, N : int, ell : int = 0 ):
 
 
 
-def power_Kaiser( *, y : jax.Array, kmodes : jax.Array, b : float, sigma_r : float, nmu : int, param ) -> tuple[jax.Array]:
+def power_Kaiser( *, y : jax.Array, kmodes : jax.Array, b : float, sigma_z : float, nmu : int, param ) -> tuple[jax.Array]:
     """ compute the anisotropic power spectrum using the Kaiser formula
     
     Args:
@@ -1283,7 +1283,7 @@ def power_Kaiser( *, y : jax.Array, kmodes : jax.Array, b : float, sigma_r : flo
         mu (array_like)      : mu bins
         theta (array_like)   : theta bins, mu = cos(theta)
     """
-    theta = jnp.linspace(0,2*jnp.pi,nmu)
+    theta = jnp.linspace(0,2*jnp.pi,nmu,endpoint=False)
     mu = jnp.cos( theta )
 
     fac = 2 * jnp.pi**2 * param['A_s']
@@ -1291,7 +1291,7 @@ def power_Kaiser( *, y : jax.Array, kmodes : jax.Array, b : float, sigma_r : flo
     thetam = jnp.sqrt(fac *(kmodes/param['k_p'])**(param['n_s'] - 1) * kmodes**(-3)) * y[:,10]
 
     c_over_H = 299792.458 / (param['H0'])   # TODO: this needs to divided by E(z)!!
-    Fkmu = jnp.exp( -(kmodes[:,None] * c_over_H)**2 * mu[None,:]**2 * sigma_r**2 )
+    Fkmu = jnp.exp( -(kmodes[:,None] * c_over_H)**2 * mu[None,:]**2 * sigma_z**2 )
 
     Pkmu =  (b*deltam[:,None] - mu[None,:]**2 * thetam[:,None])**2 * Fkmu
     return Pkmu, mu, theta
