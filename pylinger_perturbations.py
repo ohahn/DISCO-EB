@@ -1267,13 +1267,14 @@ def get_xi_from_P( *, k : jnp.array, Pk : jnp.array, N : int, ell : int = 0 ):
 
 
 
-def power_Kaiser( *, y : jax.Array, kmodes : jax.Array, b : float, sigma_z : float, nmu : int, param ) -> tuple[jax.Array]:
+def power_Kaiser( *, y : jax.Array, kmodes : jax.Array, b : float, aexp : float, sigma_z : float, nmu : int, param ) -> tuple[jax.Array]:
     """ compute the anisotropic power spectrum using the Kaiser formula
     
     Args:
         y (array_like)       : input solution from the EB solver
         kmodes (array_like)  : the list of wave numbers
         b (float)            : linear tracer bias
+        aexp (float)         : scale factor
         sigma_z (float)      : redshift error sigma_z = sigma_z0 * (1+z)
         nmu (int)            : number of mu bins
         param (dict)         : dictionary of all data
@@ -1283,18 +1284,21 @@ def power_Kaiser( *, y : jax.Array, kmodes : jax.Array, b : float, sigma_z : flo
         mu (array_like)      : mu bins
         theta (array_like)   : theta bins, mu = cos(theta)
     """
-    theta = jnp.linspace(0,2*jnp.pi,nmu,endpoint=False)
-    mu = jnp.cos( theta )
+    alpha = jnp.linspace(-jnp.pi,jnp.pi,nmu,endpoint=False)
+    mu = jnp.cos( alpha )
+
+    grho,_ = compute_rho_p( aexp, param )
+    aprimeoa = jnp.sqrt(grho / 3.0)
 
     fac = 2 * jnp.pi**2 * param['A_s']
     deltam = jnp.sqrt(fac *(kmodes/param['k_p'])**(param['n_s'] - 1) * kmodes**(-3)) * y[:,9]
     thetam = jnp.sqrt(fac *(kmodes/param['k_p'])**(param['n_s'] - 1) * kmodes**(-3)) * y[:,10]
 
-    c_over_H = 299792.458 / (param['H0'])   # TODO: this needs to divided by E(z)!!
-    Fkmu = jnp.exp( -(kmodes[:,None] * c_over_H)**2 * mu[None,:]**2 * sigma_z**2 )
+    
+    Fkmu = jnp.exp( -(kmodes[:,None] / aprimeoa)**2 * mu[None,:]**2 * sigma_z**2 )
 
-    Pkmu =  (b*deltam[:,None] - mu[None,:]**2 * thetam[:,None])**2 * Fkmu
-    return Pkmu, mu, theta
+    Pkmu =  (b*deltam[:,None] - mu[None,:]**2 * thetam[:,None] / aprimeoa)**2 * Fkmu
+    return Pkmu, mu, alpha
 
 
 
