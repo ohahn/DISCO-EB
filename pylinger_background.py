@@ -1,6 +1,6 @@
 from pylinger_thermodynamics_recfast import compute_thermo as compute_thermo_recfast, evaluate_thermo as evaluate_thermo_recfast
 from pylinger_thermodynamics_mb95 import compute_thermo as compute_thermo_mb95
-from pylinger_cosmo import dtauda_, nu_background
+from pylinger_cosmo import nu_background
 import jax
 import jax.numpy as jnp
 import diffrax as drx
@@ -56,7 +56,7 @@ def evolve_background( *, param, thermo_module = 'RECFAST', rtol: float = 1e-5, 
     param['a'] = a
 
     # Compute the neutrino density and pressure
-    rhonu_, pnu_, ppnu_ = jax.vmap( lambda a_ : nu_background( a_, param['amnu'] ), in_axes=0 )( param['a'] )
+    rhonu_, pnu_, ppnu_ = jax.vmap( lambda a_ : nu_background( a_, param['amnu'] ), in_axes=0 )( a )
 
     rhonu_coeff = drx.backward_hermite_coefficients(ts=loga, ys=jnp.log(rhonu_))
     pnu_coeff = drx.backward_hermite_coefficients(ts=loga, ys=jnp.log(pnu_))
