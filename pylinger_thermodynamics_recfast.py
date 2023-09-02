@@ -121,7 +121,8 @@ def model_recfast( *, tau : float, yin : jnp.array, param : dict ) -> jnp.array:
   xHep = yin[1]
   xp   = yin[2]
   xe   = xHep + xp
-  TM   = jnp.clip(yin[3], 1e-8, 1.1*param['Tcmb']) / a    # y[3]=a*T since it is O(1) and does not evolve by orders of magnitude
+  # TM   = jnp.clip(yin[3], 1e-8, 1.1*param['Tcmb']) / a    # y[3]=a*T since it is O(1) and does not evolve by orders of magnitude
+  TM   = yin[3] / a
   TR   = param['Tcmb'] / a
 
   fHe = param['YHe'] / (const_mHe_mH*(1-param['YHe']))
@@ -194,9 +195,9 @@ def model_recfast( *, tau : float, yin : jnp.array, param : dict ) -> jnp.array:
   # Comp = 8/3 * const_sigmaT * const_aRad / const_me / const_c * TR**4 
   Comp = (4.707988984123603e-06 * TR)**4 / const_c_Mpc_s
   compton_term = Comp * xe/(1 + xe + fHe)
-  compton_term = softclip(compton_term, -100 * Hz, 100 * Hz )
+  # compton_term = softclip(compton_term, -100 * Hz, 100 * Hz )
   daTdtau      = a**2 * (compton_term * (TR - TM) - Hz * TM )
-  daTdtau      = jnp.clip( daTdtau, -a, a )
+  # daTdtau      = jnp.clip( daTdtau, -a, a )
 
   fvec = jnp.zeros(4)
   fvec = fvec.at[0].set( dlogadtau )
@@ -205,7 +206,7 @@ def model_recfast( *, tau : float, yin : jnp.array, param : dict ) -> jnp.array:
   fvec = fvec.at[3].set( daTdtau )
 
   # limit xHep to 1e-7 to avoid numerical problems
-  fvec = fvec.at[1].set( jax.lax.cond( jnp.abs(xHep) < 1e-6, lambda x: (1e-7-xHep)/tau, lambda x: fvec[1], None ) )
+  # fvec = fvec.at[1].set( jax.lax.cond( jnp.abs(xHep) < 1e-6, lambda x: (1e-7-xHep)/tau, lambda x: fvec[1], None ) )
 
 #   jax.debug.print('tau = {}, y = {}, f = {}', tau, yin, fvec)
   return fvec
@@ -284,9 +285,16 @@ def evaluate_thermo( *, param : dict, num_thermo = 2048 ) -> jax.Array:
     
     Tm     = y[:,3]/a
 
+    # daTmdtau  = dydtau[:,3] 
+    # daTmdloga = daTmdtau / dadtau(a=a, param=param) * a #Hubble( a=a, param=param) 
+    # mu        = 1/(1 + (1/const_mHe_mH-1) * param['YHe'] + (1-param['YHe']) * xe)
+    # cs2       = const_kB/ const_mH / const_c**2 / mu * Tm * (4 - daTmdloga / (Tm*a)) /3
+
     daTmdtau  = dydtau[:,3] 
-    daTmdloga = daTmdtau / dadtau(a=a, param=param) * a #Hubble( a=a, param=param) 
+    daTmda    = daTmdtau / dadtau(a=a, param=param) #Hubble( a=a, param=param) 
     mu        = 1/(1 + (1/const_mHe_mH-1) * param['YHe'] + (1-param['YHe']) * xe)
-    cs2       = const_kB/ const_mH / const_c**2 / mu * Tm * (4 - daTmdloga / (Tm*a)) /3
+    cs2       = const_kB/ const_mH / const_c**2 / mu * Tm * (4 - daTmda / (Tm)) /3
+    cs2       = cs2.at[0].set( const_kB/ const_mH / const_c**2 / mu[0] * Tm[0] * 4/3 )
+
 
     return tau, a, cs2, Tm, mu, xe, xeHI, xeHeI, xeHeII, 
