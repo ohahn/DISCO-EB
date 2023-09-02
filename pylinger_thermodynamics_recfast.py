@@ -38,10 +38,19 @@ const_Hfac = 1/(1.0e+06*3.0856775807e+13) # 1 km/s/Mpc in 1/s
 
 MAX_EXP = 60
 
-def NHnow( *, a, param ):
-    mu_H = 1/(1-param['YHe']) 
-    rho_c = 3 * (param['H0']*const_Hfac)**2 / (8 * jnp.pi * const_G) 
-    return rho_c * param['Omegab'] / (const_mH * mu_H) / a**3
+@jax.custom_jvp
+def NHnow( a, YHe, H0, Omegab ):
+    mu_H = 1/(1-YHe) 
+    rho_c = 3 * (H0*const_Hfac)**2 / (8 * jnp.pi * const_G) 
+    return rho_c * Omegab / (const_mH * mu_H) / a**3
+
+@NHnow.defjvp
+def NHnow_jvp( primals, tangents ):
+    a, YHe, H0, Omegab = primals
+    da, dYHe, dH0, dOmegab = tangents
+    N = NHnow( a, YHe, H0, Omegab )
+    dN = N * ( -3 * da/a + dOmegab/Omegab + 2*dH0/H0 + dYHe/(1-YHe)  )
+    return N, dN
 
 @jax.custom_jvp
 def SahaBoltzmann_( gi, gc, E_ion, T ):
@@ -93,7 +102,7 @@ def Saha_HeII( a, param ):
     fHe = param['YHe']/(const_mHe_mH*(1.0-param['YHe']))
     A = 1 + fHe
     B = 1 + 2*fHe
-    R = (2*jnp.pi* const_me * const_kB / const_h**2 * T )**1.5 / NHnow( a=a, param=param )  * jnp.exp( - betaE )
+    R = (2*jnp.pi* const_me * const_kB / const_h**2 * T )**1.5 / NHnow( a, param['YHe'], param['H0'], param['Omegab'] ) * jnp.exp( - betaE )
 
     xe = jax.lax.cond( R>1e3, 
                       lambda x: fHe * (1 - B/R + (1 + 5*fHe + 6*fHe**2)/R**2), # asymptotic expansion to prevent truncation errors
@@ -112,14 +121,15 @@ def model_recfast( *, tau : float, yin : jnp.array, param : dict ) -> jnp.array:
   xHep = yin[1]
   xp   = yin[2]
   xe   = xHep + xp
-  TM   = jnp.clip(yin[3], 1e-8, 1.1*param['Tcmb']) / a    # y[3]=a*T since it is O(1) and does not evolve by orders of magnitude
+  # TM   = jnp.clip(yin[3], 1e-8, 1.1*param['Tcmb']) / a    # y[3]=a*T since it is O(1) and does not evolve by orders of magnitude
+  TM   = yin[3] / a
   TR   = param['Tcmb'] / a
 
   fHe = param['YHe'] / (const_mHe_mH*(1-param['YHe']))
   
   Hz = dadtau( a=a, param=param ) / a**2  # is in units of 1/Mpc
 
-  nHtot = NHnow( a=a, param=param ) * rescale
+  nHtot = NHnow( a, param['YHe'], param['H0'], param['Omegab'] ) * rescale
   nH1  = jax.lax.cond( xp > 0.999, lambda x: 0.0, lambda x: (1-xp) * nHtot, None )
   nHe1 = jax.lax.cond( xHep > 0.999*fHe, lambda x: 0.0, lambda x: (fHe - xHep) * nHtot, None )
 
@@ -178,16 +188,16 @@ def model_recfast( *, tau : float, yin : jnp.array, param : dict ) -> jnp.array:
   dxHepdtau = a * (-alphaHe*xe*xHep*nHtot + betaHe*(fHe-xHep)*fBHe)*fCHe
   dxpdtau   = a * (-alphaH*xe*xp*nHtot + betaH*(1.0-xp)*fBH)*fCH
 
-  dxHepdtau = softclip( dxHepdtau, -1e6, 1e6 )
-  dxpdtau   = softclip( dxpdtau, -1e6, 1e6 )
+#   dxHepdtau = softclip( dxHepdtau, -1e6, 1e6 )
+#   dxpdtau   = softclip( dxpdtau, -1e6, 1e6 )
   
   # limit compton term to avoid numerical problems
   # Comp = 8/3 * const_sigmaT * const_aRad / const_me / const_c * TR**4 
   Comp = (4.707988984123603e-06 * TR)**4 / const_c_Mpc_s
   compton_term = Comp * xe/(1 + xe + fHe)
-  compton_term = jnp.clip(compton_term, -1000 * Hz, 1000 * Hz )
+  # compton_term = softclip(compton_term, -100 * Hz, 100 * Hz )
   daTdtau      = a**2 * (compton_term * (TR - TM) - Hz * TM )
-  daTdtau      = jnp.clip( daTdtau, -a, a )
+  # daTdtau      = jnp.clip( daTdtau, -a, a )
 
   fvec = jnp.zeros(4)
   fvec = fvec.at[0].set( dlogadtau )
@@ -196,7 +206,7 @@ def model_recfast( *, tau : float, yin : jnp.array, param : dict ) -> jnp.array:
   fvec = fvec.at[3].set( daTdtau )
 
   # limit xHep to 1e-7 to avoid numerical problems
-  fvec = fvec.at[1].set( jax.lax.cond( jnp.abs(xHep) < 1e-6, lambda x: (1e-7-xHep)/tau, lambda x: fvec[1], None ) )
+  # fvec = fvec.at[1].set( jax.lax.cond( jnp.abs(xHep) < 1e-6, lambda x: (1e-7-xHep)/tau, lambda x: fvec[1], None ) )
 
 #   jax.debug.print('tau = {}, y = {}, f = {}', tau, yin, fvec)
   return fvec
@@ -208,7 +218,7 @@ class VectorField(eqx.Module):
         return self.model(loga, y, args)   
 
 # @partial(jax.jit, backend='cpu')
-@jax.jit
+# @jax.jit
 def compute_thermo( *, param : dict ) -> dict:
 
     model = drx.ODETerm(VectorField(
@@ -226,7 +236,9 @@ def compute_thermo( *, param : dict ) -> dict:
     param['fHe'] = param['YHe']/(const_mHe_mH*(1.0-param['YHe']))
 
     # saveat = drx.SaveAt( dense=True )
-    saveat = drx.SaveAt( t0=True,t1=True, dense=True )
+    # saveat = drx.SaveAt( t0=True,t1=True, dense=True )
+    saveat = drx.SaveAt( steps=True, dense=True )
+    
 
     sol =drx.diffeqsolve(
         terms=model,
@@ -241,6 +253,7 @@ def compute_thermo( *, param : dict ) -> dict:
         args=(param, ),
         # adjoint=drx.RecursiveCheckpointAdjoint(),
         adjoint=drx.DirectAdjoint(),
+        # adjoint=drx.ImplicitAdjoint(),
     )
 
     # jax.debug.print('sol = {}', sol)
@@ -253,6 +266,11 @@ def compute_thermo( *, param : dict ) -> dict:
 def evaluate_thermo( *, param : dict, num_thermo = 2048 ) -> jax.Array:
 
     sol    = param['sol']
+
+    # i = jnp.argsort( sol.ts )
+    # tau   = sol.ts[i]
+    # y    = sol.ys[i,:]
+
     tau00  = param['tau_of_a_spline'].evaluate(5e-5)
     tau    = jnp.geomspace( tau00, sol.t1, num_thermo )
     tau    = tau.at[0].set(sol.t0)
@@ -267,9 +285,16 @@ def evaluate_thermo( *, param : dict, num_thermo = 2048 ) -> jax.Array:
     
     Tm     = y[:,3]/a
 
+    # daTmdtau  = dydtau[:,3] 
+    # daTmdloga = daTmdtau / dadtau(a=a, param=param) * a #Hubble( a=a, param=param) 
+    # mu        = 1/(1 + (1/const_mHe_mH-1) * param['YHe'] + (1-param['YHe']) * xe)
+    # cs2       = const_kB/ const_mH / const_c**2 / mu * Tm * (4 - daTmdloga / (Tm*a)) /3
+
     daTmdtau  = dydtau[:,3] 
-    daTmdloga = daTmdtau / dadtau(a=a, param=param) * a #Hubble( a=a, param=param) 
+    daTmda    = daTmdtau / dadtau(a=a, param=param) #Hubble( a=a, param=param) 
     mu        = 1/(1 + (1/const_mHe_mH-1) * param['YHe'] + (1-param['YHe']) * xe)
-    cs2       = const_kB/ const_mH / const_c**2 / mu * Tm * (4 - daTmdloga / (Tm*a)) /3
+    cs2       = const_kB/ const_mH / const_c**2 / mu * Tm * (4 - daTmda / (Tm)) /3
+    cs2       = cs2.at[0].set( const_kB/ const_mH / const_c**2 / mu[0] * Tm[0] * 4/3 )
+
 
     return tau, a, cs2, Tm, mu, xe, xeHI, xeHeI, xeHeII, 

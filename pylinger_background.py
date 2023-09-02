@@ -1,6 +1,6 @@
 from pylinger_thermodynamics_recfast import compute_thermo as compute_thermo_recfast, evaluate_thermo as evaluate_thermo_recfast
 from pylinger_thermodynamics_mb95 import compute_thermo as compute_thermo_mb95
-from pylinger_cosmo import dtauda_, nu_background
+from pylinger_cosmo import nu_background
 import jax
 import jax.numpy as jnp
 import diffrax as drx
@@ -37,11 +37,11 @@ def evolve_background( *, param, thermo_module = 'RECFAST', rtol: float = 1e-5, 
 
     # mean densities
     Omegak = 0.0 #1.0 - Omegam - OmegaL
-
-    param['grhom'] = 3.3379e-11 * param['H0']**2    # critical density at z=0 in h^2/Mpc^3
-    param['grhog'] = 1.4952e-13 * param['Tcmb']**4  # photon density in h^2/Mpc^3
-    param['grhor'] = 3.3957e-14 * param['Tcmb']**4  # neutrino density per flavour in h^2/Mpc^3
-    param['adotrad'] = 2.8948e-7 * param['Tcmb']**2 # Hubble during radiation domination
+    param['grhom'] = 3.33795017e-11 * param['H0']**2    # critical density at z=0 in h^2/Mpc^3
+    param['grhog'] = 1.49594245e-13 * param['Tcmb']**4  # photon density in h^2/Mpc^3
+    param['grhor'] = 3.39739477e-14 * param['Tcmb']**4  # neutrino density per flavour in h^2/Mpc^3
+    param['adotrad'] = jnp.sqrt((param['grhog']+param['grhor']*(param['Neff']+param['Nmnu'])) / 3.0)
+    # param['adotrad'] = 2.8948e-7 * param['Tcmb']**2 # Hubble during radiation domination
 
     param['amnu'] = param['mnu'] * c2ok / param['Tcmb'] # conversion factor for Neutrinos masses (m_nu*c**2/(k_B*T_nu0)
 
@@ -56,7 +56,7 @@ def evolve_background( *, param, thermo_module = 'RECFAST', rtol: float = 1e-5, 
     param['a'] = a
 
     # Compute the neutrino density and pressure
-    rhonu_, pnu_, ppnu_ = jax.vmap( lambda a_ : nu_background( a_, param['amnu'] ), in_axes=0 )( param['a'] )
+    rhonu_, pnu_, ppnu_ = jax.vmap( lambda a_ : nu_background( a_, param['amnu'] ), in_axes=0 )( a )
 
     rhonu_coeff = drx.backward_hermite_coefficients(ts=loga, ys=jnp.log(rhonu_))
     pnu_coeff = drx.backward_hermite_coefficients(ts=loga, ys=jnp.log(pnu_))
@@ -92,6 +92,7 @@ def evolve_background( *, param, thermo_module = 'RECFAST', rtol: float = 1e-5, 
         param['a_of_tau_spline'] = drx.CubicInterpolation( ts=tau, coeffs=param['a_coeff'] )
 
         param['a'] = aexp
+        param['tau'] = tau
 
         tau, a, cs2, Tm, mu, xe, xeHI, xeHeI, xeHeII = evaluate_thermo_recfast( param=param, num_thermo=num_thermo )
 
@@ -142,6 +143,7 @@ def evolve_background( *, param, thermo_module = 'RECFAST', rtol: float = 1e-5, 
         param['tempba_of_tau_spline'] = drx.CubicInterpolation( ts=tau, coeffs=param['tba_coeff'] )
 
         param['a'] = a
+        param['tau'] = tau
 
         param['tau_coeff'] = drx.backward_hermite_coefficients(ts=a, ys=tau)
         param['tau_of_a_spline'] = drx.CubicInterpolation( ts=a, coeffs=param['tau_coeff'] )
@@ -165,6 +167,7 @@ def evolve_background( *, param, thermo_module = 'RECFAST', rtol: float = 1e-5, 
         param['tau_of_a_spline']     = drx.CubicInterpolation( ts=class_thermo['scale factor a'][::-1],   coeffs=param['tau_coeff'] )
 
         param['a'] = class_thermo['scale factor a'][::-1]
+        param['tau'] = class_thermo['conf. time [Mpc]'][::-1]
     
 
     
