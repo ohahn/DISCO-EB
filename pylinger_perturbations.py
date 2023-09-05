@@ -760,7 +760,7 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
 
     # ... determine starting time
     tau_start = determine_starting_time( param=param, k=kmode )
-    tau_start = jnp.minimum( jnp.min(tau_out), tau_start )
+    tau_start = 0.99 * jnp.minimum( jnp.min(tau_out), tau_start )
 
     # ... set adiabatic ICs
     y0 = adiabatic_ics_one_mode( tau=tau_start, param=param, kmode=kmode, nvar=nvar, 

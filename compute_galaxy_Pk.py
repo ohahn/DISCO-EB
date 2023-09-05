@@ -93,7 +93,7 @@ def Pkbiased( args ):
 
     iq0 = 10 + lmaxg + lmaxgp + lmaxr
 
-    rhonu = param['rhonu_of_a_spline'].evaluate(a)
+    rhonu = jnp.exp(param['logrhonu_of_loga_spline'].evaluate(jnp.log(a)))
     fnu = (param['grhor'] * rhonu / a**4) / (param['grhom'] / a**3)
     
     Pkc =  (kmodes/k_p)**(n_s - 1) * kmodes**(-3) * y[:,iout,3]**2  
