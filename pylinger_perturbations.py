@@ -908,7 +908,7 @@ def get_power( *, k : jax.Array, y : jax.Array, idx : int , param : dict) -> jax
     Returns:
         Pk (array_like)  : the power spectrum
     """
-    return 2 * jnp.pi**2 * param['A_s'] *(k/param['k_p'])**(param['n_s'] - 1) * k**(-3) * y**2
+    return 2 * jnp.pi**2 * param['A_s'] *(k/param['k_p'])**(param['n_s'] - 1) * k**(-3) * y[...,idx]**2
 
 
 def power_Kaiser( *, y : jax.Array, kmodes : jax.Array, b : float, aexp : float, sigma_z : float, nmu : int, param ) -> tuple[jax.Array]:
