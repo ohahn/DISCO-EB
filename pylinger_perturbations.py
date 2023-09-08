@@ -1,7 +1,7 @@
 import jax
 import jax.numpy as jnp
 
-from pylinger_util import lngamma_complex_e
+from pylinger_util import lngamma_complex_e, root_find_bisect
 
 
 import diffrax as drx
@@ -618,32 +618,6 @@ def adiabatic_ics_one_mode( *, tau: float, param, kmode, nvar, lmaxg, lmaxgp, lm
     y = y.at[-1].set( thetaq )
     
     return y
-
-def root_find_bisect( *, func, xleft, xright, numit, param ):
-    """
-    Simple bisection routine for root finding.
-    
-    Parameters
-    ----------
-    func : function
-        Function to be evaluated.
-    xleft : float
-        Left boundary of the interval.
-    xright : float
-        Right boundary of the interval.
-    numit : int
-        Number of iterations.
-
-    Returns
-    -------
-    x0 : float
-        Approximation to the root, given by the midpoint of the final interval.
-
-    """
-    for i in range(numit):
-        xmid = 0.5 * (xleft + xright)
-        xleft, xright = jax.lax.cond(func(xmid, param) * func(xleft, param) > 0, lambda x : (xmid, xright), lambda x : (xleft, xmid), None )
-    return 0.5 * (xleft + xright)
 
 
 def determine_starting_time( *, param, k ):
