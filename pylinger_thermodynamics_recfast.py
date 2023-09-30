@@ -49,7 +49,7 @@ def NHnow_jvp( primals, tangents ):
     a, YHe, H0, Omegab = primals
     da, dYHe, dH0, dOmegab = tangents
     N = NHnow( a, YHe, H0, Omegab )
-    dN = N * ( -3 * da/a + dOmegab/Omegab + 2*dH0/H0 + dYHe/(1-YHe)  )
+    dN = N * ( -3 * da/a + dOmegab/Omegab + 2*dH0/H0 - dYHe/(1-YHe)  )
     return N, dN
 
 @jax.custom_jvp
@@ -104,7 +104,7 @@ def Saha_HeII( a, param ):
     B = 1 + 2*fHe
     R = (2*jnp.pi* const_me * const_kB / const_h**2 * T )**1.5 / NHnow( a, param['YHe'], param['H0'], param['Omegab'] ) * jnp.exp( - betaE )
 
-    xe = jax.lax.cond( R>1e3, 
+    xe = jax.lax.cond( R>1e5, 
                       lambda x: fHe * (1 - B/R + (1 + 5*fHe + 6*fHe**2)/R**2), # asymptotic expansion to prevent truncation errors
                       lambda x:  -(R-A)/2 + jnp.sqrt( (R-A)**2/4 + R*B ) - A, None )
     
@@ -135,7 +135,6 @@ def model_recfast( *, tau : float, yin : jnp.array, param : dict ) -> jnp.array:
 
   #  Calculate the Saha and Boltzmann equilibrium relations
   SHe = SahaBoltzmann( gi=1, gc=2, E_ion=const_EionHe2s, T=TM )
-  # SHe = SahaBoltzmann( gi=1, gc=2, E_ion=const_EionHe2s, T=TM )
   fBHe = fBoltzmann( gj=1, gi=1, E=const_E2s1sHe, T=TM )
   
   SH = SahaBoltzmann( gi=2, gc=1, E_ion=const_EionH2s, T=TM)
@@ -194,16 +193,24 @@ def model_recfast( *, tau : float, yin : jnp.array, param : dict ) -> jnp.array:
   # limit compton term to avoid numerical problems
   # Comp = 8/3 * const_sigmaT * const_aRad / const_me / const_c * TR**4 
   Comp = (4.707988984123603e-06 * TR)**4 / const_c_Mpc_s
+
+  # fHe = param['YHe'] / (const_mHe_mH*(1-param['YHe']))
   compton_term = Comp * xe/(1 + xe + fHe)
-  # compton_term = softclip(compton_term, -100 * Hz, 100 * Hz )
   daTdtau      = a**2 * (compton_term * (TR - TM) - Hz * TM )
-  # daTdtau      = jnp.clip( daTdtau, -a, a )
+  # dTdtau = (compton_term * (TR - TM) )*a - 2 * TM * dadtau( a=a, param=param ) / a
+
+  dxpdtau = jax.lax.cond( a < 1e-5, lambda x: 0.0, lambda x: dxpdtau, None )
+  dxHepdtau = jax.lax.cond( a < 1e-5, lambda x: 0.0, lambda x: dxHepdtau, None )
+
+  daTdtau = jax.lax.cond( a < 1e-5, lambda x: 0.0, lambda x: daTdtau, None )
+  # daTdtau = jax.lax.cond( a < 1e-6, lambda x: a**2 * compton_term * (TR - TM), lambda x: daTdtau, None )
 
   fvec = jnp.zeros(4)
   fvec = fvec.at[0].set( dlogadtau )
   fvec = fvec.at[1].set( dxHepdtau )
   fvec = fvec.at[2].set( dxpdtau )
   fvec = fvec.at[3].set( daTdtau )
+  # fvec = fvec.at[3].set( dTdtau )
 
   # limit xHep to 1e-7 to avoid numerical problems
   # fvec = fvec.at[1].set( jax.lax.cond( jnp.abs(xHep) < 1e-6, lambda x: (1e-7-xHep)/tau, lambda x: fvec[1], None ) )
@@ -237,7 +244,7 @@ def compute_thermo( *, param : dict ) -> dict:
 
     # saveat = drx.SaveAt( dense=True )
     # saveat = drx.SaveAt( t0=True,t1=True, dense=True )
-    saveat = drx.SaveAt( steps=True, dense=True )
+    saveat = drx.SaveAt( t0=True,t1=True,ts=jnp.geomspace(t0*1.001,t1*0.999,1024))#, steps=True, dense=True )
     
 
     sol =drx.diffeqsolve(
@@ -248,7 +255,7 @@ def compute_thermo( *, param : dict ) -> dict:
         dt0=t0*1e-2,
         y0=y0,
         saveat=saveat,  
-        stepsize_controller = drx.PIDController(rtol=1e-5,atol=1e-10,pcoeff=0.2, icoeff=1 ),
+        stepsize_controller = drx.PIDController(rtol=1e-8,atol=1e-10,pcoeff=0.2, icoeff=1 ),
         max_steps=2048,
         args=(param, ),
         # adjoint=drx.RecursiveCheckpointAdjoint(),
@@ -267,34 +274,57 @@ def evaluate_thermo( *, param : dict, num_thermo = 2048 ) -> jax.Array:
 
     sol    = param['sol']
 
-    # i = jnp.argsort( sol.ts )
-    # tau   = sol.ts[i]
-    # y    = sol.ys[i,:]
+    # # i = jnp.argsort( sol.ts )
+    # # tau   = sol.ts[i]
+    # # y    = sol.ys[i,:]
 
-    tau00  = param['tau_of_a_spline'].evaluate(5e-5)
-    tau    = jnp.geomspace( tau00, sol.t1, num_thermo )
-    tau    = tau.at[0].set(sol.t0)
-    y      = jax.vmap( sol.evaluate )( tau )
-    dydtau = jax.vmap( lambda tau_, y_: model_recfast( tau=tau_, yin=y_, param=param ) )( tau, y )
+    # tau00  = param['tau_of_a_spline'].evaluate(1e-5)
+    # tau    = jnp.geomspace( tau00, sol.t1, num_thermo )
+    # tau    = tau.at[0].set(sol.t0)
+    # y      = jax.vmap( sol.evaluate )( tau )
+    # dydtau = jax.vmap( lambda tau_, y_: model_recfast( tau=tau_, yin=y_, param=param ) )( tau, y )
 
-    a      = jnp.exp(y[:,0])
-    xeHeII = jax.vmap( lambda a_: Saha_HeII( a_, param) )( a )
-    xeHeI  = y[:,1]
-    xeHI   = y[:,2]
-    xe     = xeHI + xeHeI + xeHeII
+    # a      = jnp.exp(y[:,0])
+    # xeHeII = jax.vmap( lambda a_: Saha_HeII( a_, param) )( a )
+    # xeHeI  = y[:,1]
+    # xeHI   = y[:,2]
+    # xe     = xeHI + xeHeI + xeHeII
     
-    Tm     = y[:,3]/a
+    # Tm     = y[:,3]/a
+
+    # # daTmdtau  = dydtau[:,3] 
+    # # daTmdloga = daTmdtau / dadtau(a=a, param=param) * a #Hubble( a=a, param=param) 
+    # # mu        = 1/(1 + (1/const_mHe_mH-1) * param['YHe'] + (1-param['YHe']) * xe)
+    # # cs2       = const_kB/ const_mH / const_c**2 / mu * Tm * (4 - daTmdloga / (Tm*a)) /3
 
     # daTmdtau  = dydtau[:,3] 
-    # daTmdloga = daTmdtau / dadtau(a=a, param=param) * a #Hubble( a=a, param=param) 
+    # daTmda    = daTmdtau / dadtau(a=a, param=param) #Hubble( a=a, param=param) 
     # mu        = 1/(1 + (1/const_mHe_mH-1) * param['YHe'] + (1-param['YHe']) * xe)
-    # cs2       = const_kB/ const_mH / const_c**2 / mu * Tm * (4 - daTmdloga / (Tm*a)) /3
+    # cs2       = const_kB/ const_mH / const_c**2 / mu * Tm * (4 - daTmda / (Tm)) /3
+    # cs2       = cs2.at[0].set( const_kB/ const_mH / const_c**2 / mu[0] * Tm[0] * 4/3 )
 
+
+
+    tau = sol.ts
+    y   = sol.ys
+    dydtau = jax.vmap( lambda tau_, y_: model_recfast( tau=tau_, yin=y_, param=param ) )( tau, y )
+
+    a   = jnp.exp(sol.ys[:,0])
+    xeHeII = jax.vmap( lambda a_: Saha_HeII( a_, param) )( a )
+    xeHeI  = sol.ys[:,1]
+    xeHI   = sol.ys[:,2]
+    xe     = xeHI + xeHeI + xeHeII
+    Tm     = sol.ys[:,3]/a
+    # Tm     = sol.ys[:,3]
     daTmdtau  = dydtau[:,3] 
+    # dTmdtau   = dydtau[:,3] 
+    # d(aT)/dta = T + a dT/da
     daTmda    = daTmdtau / dadtau(a=a, param=param) #Hubble( a=a, param=param) 
+    # daTmda    = Tm + a * dTmdtau / dadtau(a=a, param=param) 
     mu        = 1/(1 + (1/const_mHe_mH-1) * param['YHe'] + (1-param['YHe']) * xe)
+
+    # mu        = 1/(1 - 0.75 * param['YHe'] + (1 - param['YHe']) * xe)
     cs2       = const_kB/ const_mH / const_c**2 / mu * Tm * (4 - daTmda / (Tm)) /3
     cs2       = cs2.at[0].set( const_kB/ const_mH / const_c**2 / mu[0] * Tm[0] * 4/3 )
-
 
     return tau, a, cs2, Tm, mu, xe, xeHI, xeHeI, xeHeII, 
