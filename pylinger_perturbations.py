@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 
 from pylinger_util import lngamma_complex_e, root_find_bisect
-
+from pylinger_cosmo import get_neutrino_momentum_bins
 
 import diffrax as drx
 from diffrax.custom_types import Array, PyTree, Scalar
@@ -10,37 +10,6 @@ import equinox as eqx
 
 from functools import partial
 import jax.flatten_util as fu
-
-# @partial( jax.jit, static_argnames=('nqmax',) )
-def get_neutrino_momentum_bins(  nqmax : int ) -> tuple[jax.Array, jax.Array]:
-    """Get the momentum bins and integral kernel weights for neutrinos
-
-    Args:
-        nqmax (int): Number of momentum bins.
-
-    Returns:
-        jax.Array: q, w
-    """
-    # fermi_dirac_const = 7 * np.pi**4 / 120
-    fermi_dirac_const = 5.682196976983475
-
-    if nqmax == 3:
-        q = jnp.array([0.913201, 3.37517, 7.79184])
-        w = jnp.array([0.0687359, 3.31435, 2.29911])
-    elif nqmax == 4:
-        q = jnp.array([0.7, 2.62814, 5.90428, 12.0])
-        w = jnp.array([0.0200251, 1.84539, 3.52736, 0.289427])
-    elif nqmax == 5:
-        q = jnp.array([0.583165, 2.0, 4.0, 7.26582, 13.0])
-        w = jnp.array([0.0081201, 0.689407, 2.8063, 2.05156, 0.12681])
-    else:
-        dq = (12 + nqmax/5)/nqmax
-        q = (jnp.arange(1, nqmax + 1) - 0.5) * dq
-        dlfdlq = -q/(1+jnp.exp(-q))
-        w = dq * q**3 / (jnp.exp(q) + 1) * (-0.25*dlfdlq)
-    dlfdlq = -q/(1+jnp.exp(-q))  #TODO: recompute the coefficients without the dlfdlq factor from CAMB
-    w /= (-0.25*dlfdlq)
-    return q, w / fermi_dirac_const 
 
 
 # @partial( jax.jit, static_argnames=('nqmax0',) )
@@ -205,7 +174,7 @@ def model_synchronous(*, tau, y, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, nqm
     ca2_Q     = w_Q - w_Q_prime / 3 / ((1+w_Q)+1e-6) / aprimeoa
 
     # ... Thomson opacity coefficient
-    akthom = 2.3038921003709498E-009 * (1.0 - param['YHe']) * param['Omegab'] * param['H0']**2
+    akthom = 2.3038921003709498e-9 * (1.0 - param['YHe']) * param['Omegab'] * param['H0']**2
 
     # ... Thomson opacity
     opac    = xe * akthom / a**2
@@ -718,11 +687,11 @@ def _rms_norm_jvp(x, tx):
     return out, t_out
     
 
-@partial(jax.jit, static_argnames=('lmaxg', 'lmaxgp', 'lmaxr', 'lmaxnu', 'nqmax'))
+@partial(jax.jit, static_argnames=('lmaxg', 'lmaxgp', 'lmaxr', 'lmaxnu', 'nqmax','max_steps'))
 def evolve_one_mode( *, tau_max, tau_out, param, kmode, 
                         lmaxg : int, lmaxgp : int, lmaxr : int, lmaxnu : int, \
                         nqmax : int, rtol: float, atol: float,
-                        pcoeff : float, icoeff : float, dcoeff : float, factormax : float, factormin : float  ):
+                        pcoeff : float, icoeff : float, dcoeff : float, factormax : float, factormin : float, max_steps : int  ):
 
     modelX_ = VectorField( 
         lambda tau, y , params : model_synchronous( tau=tau, y=y, param=params[0], kmode=params[1],  
@@ -753,11 +722,11 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
             stepsize_controller = drx.PIDController(rtol=rtol, atol=atol, norm=lambda t:rms_norm_filtered(t,jnp.array([0,2,3,5,6,7]), jnp.array([1,kmode**2,1,1,1/kmode**2,1])), 
                                                     pcoeff=pcoeff, icoeff=icoeff, dcoeff=dcoeff, factormax=factormax, factormin=factormin),
             # default controller has icoeff=1, pcoeff=0, dcoeff=0
-            max_steps=2048,
+            max_steps=max_steps,
             args=(param, kmode, ),
-            # adjoint=drx.RecursiveCheckpointAdjoint(),
-            adjoint=drx.DirectAdjoint(),
-            # adjoint=drx.BacksolveAdjoint(),
+            # adjoint=drx.RecursiveCheckpointAdjoint(), # for backward differentiation
+            adjoint=drx.DirectAdjoint(),  #for forward differentiation
+            # adjoint=drx.BacksolveAdjoint(), # for backward differentiation
         )
 
     # solve before neutrinos become fluid
@@ -775,7 +744,8 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
 def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k : int, \
                          lmaxg : int = 11, lmaxgp : int = 11, lmaxr : int = 11, lmaxnu : int = 8, \
                          nqmax : int = 3, rtol: float = 1e-4, atol: float = 1e-4,
-                         pcoeff : float = 0.25, icoeff : float = 0.80, dcoeff : float = 0.0, factormax : float = 20.0, factormin : float = 0.3 ):
+                         pcoeff : float = 0.25, icoeff : float = 0.80, dcoeff : float = 0.0, \
+                         factormax : float = 20.0, factormin : float = 0.3, max_steps : int = 2048 ):
     """evolve cosmological perturbations in the synchronous gauge
 
     Parameters
@@ -826,7 +796,8 @@ def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k 
         lambda k : evolve_one_mode( tau_max=tau_max, tau_out=tau_out, 
                                     param=param, kmode=k, lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, 
                                     lmaxnu=lmaxnu, nqmax=nqmax, rtol=rtol, atol=atol,
-                                    pcoeff=pcoeff, icoeff=icoeff, dcoeff=dcoeff, factormax=factormax, factormin=factormin ),
+                                    pcoeff=pcoeff, icoeff=icoeff, dcoeff=dcoeff, 
+                                    factormax=factormax, factormin=factormin, max_steps=max_steps ),
                                     in_axes=0
     )(kmodes)
     

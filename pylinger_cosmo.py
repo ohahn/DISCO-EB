@@ -3,8 +3,39 @@ import jax.numpy as jnp
 import jax_cosmo.scipy.interpolate as jaxinterp
 
 
-@jax.jit
-def nu_background( a : float, amnu: float, nq : int = 1000, qmax : float = 30.) -> tuple[float, float]:
+# @partial( jax.jit, static_argnames=('nqmax',) )
+def get_neutrino_momentum_bins(  nqmax : int ) -> tuple[jax.Array, jax.Array]:
+    """Get the momentum bins and integral kernel weights for neutrinos
+
+    Args:
+        nqmax (int): Number of momentum bins.
+
+    Returns:
+        jax.Array: q, w
+    """
+    # fermi_dirac_const = 7 * np.pi**4 / 120
+    fermi_dirac_const = 5.682196976983475
+
+    if nqmax == 3:
+        q = jnp.array([0.913201, 3.37517, 7.79184])
+        w = jnp.array([0.0687359, 3.31435, 2.29911])
+    elif nqmax == 4:
+        q = jnp.array([0.7, 2.62814, 5.90428, 12.0])
+        w = jnp.array([0.0200251, 1.84539, 3.52736, 0.289427])
+    elif nqmax == 5:
+        q = jnp.array([0.583165, 2.0, 4.0, 7.26582, 13.0])
+        w = jnp.array([0.0081201, 0.689407, 2.8063, 2.05156, 0.12681])
+    else:
+        dq = (12 + nqmax/5)/nqmax
+        q = (jnp.arange(1, nqmax + 1) - 0.5) * dq
+        dlfdlq = -q/(1+jnp.exp(-q))
+        w = dq * q**3 / (jnp.exp(q) + 1) * (-0.25*dlfdlq)
+    dlfdlq = -q/(1+jnp.exp(-q))  #TODO: recompute the coefficients without the dlfdlq factor from CAMB
+    w /= (-0.25*dlfdlq)
+    return q, w / fermi_dirac_const 
+
+# @jax.jit
+def nu_background( a : float, amnu: float, nq : int = 1000, qmax : float = 30. ) -> tuple[float, float]:
     """ computes the neutrino density and pressure of one flavour of massive neutrinos
         in units of the mean density of one flavour of massless neutrinos
 
@@ -49,7 +80,7 @@ def nu_background( a : float, amnu: float, nq : int = 1000, qmax : float = 30.) 
 
 
 # @partial(jax.jit, static_argnames=("params",))
-@jax.jit
+# @jax.jit
 def dtauda_(a, grhom, grhog, grhor, Omegam, OmegaDE, w_DE_0, w_DE_a, Omegak, Neff, Nmnu, amnu):
     """Derivative of conformal time with respect to scale factor"""
     # jax.debug.print( 'a={} amnu={}',a, amnu)

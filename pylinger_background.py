@@ -82,8 +82,10 @@ def evolve_background( *, param, thermo_module = 'RECFAST', rtol: float = 1e-5, 
         param['sol'] = sol
         # # param['a_of_tau_spline']     = lambda tau : jnp.exp(param['sol'].evaluate( tau )[0])
 
-        tau  = jnp.geomspace(param['taumin'], param['taumax'], num_thermo)
-        aexp = jax.vmap( lambda tau_: jnp.exp((param['sol'].evaluate(tau_))[0]), in_axes=0 )( tau )
+        # tau  = jnp.geomspace(param['taumin'], param['taumax'], num_thermo)
+        # aexp = jax.vmap( lambda tau_: jnp.exp((param['sol'].evaluate(tau_))[0]), in_axes=0 )( tau )
+        tau  = param['sol'].ts
+        aexp = jnp.exp(param['sol'].ys[:,0])
 
         param['tau_coeff'] = drx.backward_hermite_coefficients(ts=aexp, ys=tau)
         param['tau_of_a_spline'] = drx.CubicInterpolation( ts=aexp, coeffs=param['tau_coeff'] )
