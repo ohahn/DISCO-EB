@@ -36,6 +36,40 @@ def lngamma_complex_e( z : complex ):
                       lambda zz: lngamma_lanczos_complex(zz), z )
 
 
+def root_find_bisect( *, func, xleft, xright, numit, param ):
+  """
+  Simple bisection routine for root finding.
+  
+  Parameters
+  ----------
+  func : function
+    Function to be evaluated.
+  xleft : float
+    Left boundary of the interval.
+  xright : float
+    Right boundary of the interval.
+  numit : int
+    Number of iterations.
+
+  Returns
+  -------
+  x0 : float
+    Approximation to the root, given by the midpoint of the final interval.
+
+  """
+  for i in range(numit):
+        xmid = 0.5 * (xleft + xright)
+        xleft, xright = jax.lax.cond(func(xmid, param) * func(xleft, param) > 0, lambda x : (xmid, xright), lambda x : (xleft, xmid), None )
+  # def body(carry, i):
+  #   xleft, xright, param = carry
+  #   xmid = 0.5 * (xleft + xright)
+  #   carry = jax.lax.cond(func(xmid, param) * func(xleft, param) > 0, lambda x : (xmid, xright, param), lambda x : (xleft, xmid, param), None )
+  #   return carry, xmid
+
+  # (xleft, xright, param), _ = jax.lax.scan(body, (xleft, xright, param), jnp.arange(numit))
+  return 0.5 * (xleft + xright)
+
+
 def softclip(x, a_min, a_max):
     """
     Softclip function that is strictly monotonous.
