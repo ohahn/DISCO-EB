@@ -35,7 +35,7 @@ def get_neutrino_momentum_bins(  nqmax : int ) -> tuple[jax.Array, jax.Array]:
     return q, w / fermi_dirac_const 
 
 # @jax.jit
-def nu_background( a : float, amnu: float, nq : int = 1000, qmax : float = 30. ) -> tuple[float, float]:
+def nu_background( a : float, amnu: float, nq : int = 1000 ) -> tuple[float, float]:
     """ computes the neutrino density and pressure of one flavour of massive neutrinos
         in units of the mean density of one flavour of massless neutrinos
 
@@ -48,6 +48,7 @@ def nu_background( a : float, amnu: float, nq : int = 1000, qmax : float = 30. )
     Returns:
         tuple[float, float]: rho_nu/rho_nu0, p_nu/p_nu0
     """
+    qmax = (12 + nq/10)
 
     # const = 7 * np.pi**4 / 120
     const = 5.682196976983475
@@ -72,9 +73,12 @@ def nu_background( a : float, amnu: float, nq : int = 1000, qmax : float = 30. )
 
     # Apply asymptotic corrrection for q>qmax and normalize by relativistic
     # energy density.
-    rhonu = (rhonu / dq + dum1[-1] / dq) / const
-    pnu = (pnu / dq + dum2[-1] / dq) / const / 3
-    ppnu = (ppnu / dq + dum3[-1] / dq) / const / 3
+    # rhonu = (rhonu / dq + dum1[-1] / dq) / const
+    # pnu = (pnu / dq + dum2[-1] / dq) / const / 3
+    # ppnu = (ppnu / dq + dum3[-1] / dq) / const / 3
+    rhonu = rhonu / dq / const
+    pnu = pnu / dq / const / 3
+    ppnu = ppnu / dq / const / 3
     
     return rhonu, pnu, ppnu
 
