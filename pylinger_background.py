@@ -45,6 +45,7 @@ def evolve_background( *, param, thermo_module = 'RECFAST', rtol: float = 1e-5, 
 
     param['amnu'] = param['mnu'] * c2ok / param['Tcmb'] # conversion factor for Neutrinos masses (m_nu*c**2/(k_B*T_nu0)
 
+
     if thermo_module == 'CLASS':
         amin = jnp.min( class_thermo['scale factor a'] )
         amax = jnp.max( class_thermo['scale factor a'] )
@@ -72,8 +73,11 @@ def evolve_background( *, param, thermo_module = 'RECFAST', rtol: float = 1e-5, 
                                                                  param['Omegak'], param['Neff'], param['Nmnu'], 
                                                                  param['logrhonu_of_loga_spline']), amin, amax )
 
+    # ensure curvature is correct
+    Omegar = param['Neff']+param['Nmnu']*jnp.exp(param['logrhonu_spline'].evaluate(0.0))
+    Omegam = param['Omegam']
+    param['OmegaDE'] = param['Omegak'] - Omegar - Omegam
 
-    
     if thermo_module == 'RECFAST':
         # Compute the thermal history
         sol, param = compute_thermo_recfast( param=param )
