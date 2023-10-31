@@ -67,17 +67,20 @@ def evolve_background( *, param, thermo_module = 'RECFAST', rtol: float = 1e-5, 
     param['logrhonu_of_loga_spline']     = rhonu_spline
     param['logpnu_of_loga_spline']       = drx.CubicInterpolation( ts=loga, coeffs=pnu_coeff )
     param['logppseudonu_of_loga_spline'] = drx.CubicInterpolation( ts=loga, coeffs=ppnu_coeff )
+
+    # ensure curvature is correct
+    Omegar = (param['Neff']+param['Nmnu']*jnp.exp(param['logrhonu_of_loga_spline'].evaluate(0.0))) * param['grhor'] / param['grhom']
+    param['OmegaDE'] = 1.0 - param['Omegak'] - Omegar - param['Omegam']
+    print('OmegaDE = ',param['OmegaDE'])
+
+    # Compute the conformal time interval
     param['taumin'] = amin / param['adotrad']
     param['taumax'] = param['taumin'] + romb( lambda a_: dtauda_(a_,param['grhom'], param['grhog'], param['grhor'], 
                                                                  param['Omegam'], param['OmegaDE'], param['w_DE_0'], param['w_DE_a'],
                                                                  param['Omegak'], param['Neff'], param['Nmnu'], 
                                                                  param['logrhonu_of_loga_spline']), amin, amax )
 
-    # ensure curvature is correct
-    Omegar = param['Neff']+param['Nmnu']*jnp.exp(param['logrhonu_spline'].evaluate(0.0))
-    Omegam = param['Omegam']
-    param['OmegaDE'] = param['Omegak'] - Omegar - Omegam
-
+    
     if thermo_module == 'RECFAST':
         # Compute the thermal history
         sol, param = compute_thermo_recfast( param=param )
