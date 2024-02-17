@@ -5,7 +5,7 @@ from pylinger_util import lngamma_complex_e, root_find_bisect
 from pylinger_cosmo import get_neutrino_momentum_bins
 
 import diffrax as drx
-from diffrax.custom_types import Array, PyTree, Scalar
+from jaxtyping import Array, PyTree, Scalar
 import equinox as eqx
 
 from functools import partial
