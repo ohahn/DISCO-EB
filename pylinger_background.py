@@ -68,6 +68,11 @@ def evolve_background( *, param, thermo_module = 'RECFAST', rtol: float = 1e-5, 
     param['logpnu_of_loga_spline']       = drx.CubicInterpolation( ts=loga, coeffs=pnu_coeff )
     param['logppseudonu_of_loga_spline'] = drx.CubicInterpolation( ts=loga, coeffs=ppnu_coeff )
 
+    # compute the energy density today due to massive neutrinos
+    rhonu = jnp.exp(param['logrhonu_of_loga_spline'].evaluate(0.0))
+    Omegamnu = (param['grhor'] * rhonu) / param['grhom']
+    param['Omegamnu'] = Omegamnu
+
     # ensure curvature is correct
     Omegar = (param['Neff']+param['Nmnu']*jnp.exp(param['logrhonu_of_loga_spline'].evaluate(0.0))) * param['grhor'] / param['grhom']
     param['OmegaDE'] = 1.0 - param['Omegak'] - Omegar - param['Omegam']
