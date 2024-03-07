@@ -886,15 +886,16 @@ def power_Kaiser( *, y : jax.Array, kmodes : jax.Array, b : float, aexp : float,
         + param['grhom'] * param['OmegaDE'] * rho_Q * aexp**2
         + param['grhom'] * param['Omegak']
     )
-
+    
     aprimeoa = jnp.sqrt(grho / 3.0)
 
     fac = 2 * jnp.pi**2 * param['A_s']
     deltam = jnp.sqrt(fac *(kmodes/param['k_p'])**(param['n_s'] - 1) * kmodes**(-3)) * y[:,4]
     thetam = jnp.sqrt(fac *(kmodes/param['k_p'])**(param['n_s'] - 1) * kmodes**(-3)) * y[:,5]
 
-    
-    Fkmu = jnp.exp( -(kmodes[:,None] / aprimeoa)**2 * mu[None,:]**2 * sigma_z**2 )
+    # photo-z error
+    h = param['H0'] / 100.
+    Fkmu = jnp.exp( -(kmodes[:,None] / aprimeoa * h)**2 * mu[None,:]**2 * sigma_z**2 )
 
     # thetam already contains 1/ mathcal{H} factor   -f delta = theta
     Pkmu =  (b*deltam[:,None] - mu[None,:]**2 * thetam[:,None])**2 * Fkmu

@@ -4,6 +4,7 @@ from pylinger_cosmo import nu_background
 import jax
 import jax.numpy as jnp
 import diffrax as drx
+import equinox as eqx
 from jax_cosmo.scipy.integrate import romb
 from functools import partial
 
@@ -76,7 +77,6 @@ def evolve_background( *, param, thermo_module = 'RECFAST', rtol: float = 1e-5, 
     # ensure curvature is correct
     Omegar = (param['Neff']+param['Nmnu']*jnp.exp(param['logrhonu_of_loga_spline'].evaluate(0.0))) * param['grhor'] / param['grhom']
     param['OmegaDE'] = 1.0 - param['Omegak'] - Omegar - param['Omegam']
-    print('OmegaDE = ',param['OmegaDE'])
 
     # Compute the conformal time interval
     param['taumin'] = amin / param['adotrad']
