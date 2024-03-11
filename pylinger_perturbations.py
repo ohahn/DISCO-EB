@@ -755,9 +755,9 @@ def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k 
     aexp_out : array
         array of scale factors at which to output
     kmin : float
-        minimum wavenumber
+        minimum wavenumber [in units 1/Mpc]
     kmax : float
-        maximum wavenumber
+        maximum wavenumber [in units 1/Mpc]
     num_k : int
         number of wavenumbers
     lmaxg : int
@@ -780,7 +780,7 @@ def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k 
     y : array
         array of shape (num_k, nout, nvar) containing the perturbations
     k : array
-        array of shape (num_k) containing the wavenumbers
+        array of shape (num_k) containing the wavenumbers [in units 1/Mpc]
     """
     kmodes = jnp.geomspace(kmin, kmax, num_k)
     
@@ -811,14 +811,14 @@ def get_xi_from_P( *, k : jnp.array, Pk : jnp.array, N : int, ell : int = 0 ):
         A. J. S. Hamilton (2000).  MNRAS, 312:257-284
 
     Args:
-        k (array_like)   : the wavenumbers
+        k (array_like)   : the wavenumbers [units 1/Mpc]
         Pk (array_like)  : the power spectrum
         N (int)          : length of the input vector
         ell (int)        : the multipole to compute (0,2,4,...)
 
     Returns:
         xi (array_like)  : the correlation function
-        r (array_like)   : the radii
+        r (array_like)   : the radii [units in Mpc]
     """
     N = len(k)
     kmin = k[0]
@@ -845,7 +845,7 @@ def get_power( *, k : jax.Array, y : jax.Array, idx : int , param : dict) -> jax
     """ compute the power spectrum from the perturbations
     
     Args:
-        k (array_like)   : the wavenumbers
+        k (array_like)   : the wavenumbers [in units 1/Mpc]
         y (array_like)   : the perturbations
         idx (int)        : index of the perturbation to compute the power spectrum for
         param (dict)     : dictionary of all parameters
@@ -909,7 +909,7 @@ def power_multipoles( *, y : jnp.array, kmodes : jnp.array, b : float, param ) -
 
     Args:
         y (array_like)       : input solution from the EB solver
-        kmodes (array_like)  : the list of wave numbers
+        kmodes (array_like)  : the list of wave numbers [in units 1/Mpc]
         b (float)            : linear bias
 
     Returns:
