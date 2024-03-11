@@ -856,12 +856,12 @@ def get_power( *, k : jax.Array, y : jax.Array, idx : int , param : dict) -> jax
     return 2 * jnp.pi**2 * param['A_s'] *(k/param['k_p'])**(param['n_s'] - 1) * k**(-3) * y[...,idx]**2
 
 
-def power_Kaiser( *, y : jax.Array, kmodes : jax.Array, b : float, aexp : float, sigma_z : float, nmu : int, param ) -> tuple[jax.Array]:
+def power_Kaiser( *, y : jax.Array, kmodes : jax.Array, b : float, aexp : float, sigma_z0 : float, nmu : int, param ) -> tuple[jax.Array]:
     """ compute the anisotropic power spectrum using the Kaiser formula
     
     Args:
         y (array_like)       : input solution from the EB solver
-        kmodes (array_like)  : the list of wave numbers
+        kmodes (array_like)  : the list of wave numbers in units of [1/Mpc]
         b (float)            : linear tracer bias
         aexp (float)         : scale factor
         sigma_z0 (float)     : redshift error sigma_z = sigma_z0 * (1+z)
@@ -895,7 +895,8 @@ def power_Kaiser( *, y : jax.Array, kmodes : jax.Array, b : float, aexp : float,
 
     # photo-z error
     h = param['H0'] / 100.
-    Fkmu = jnp.exp( -(kmodes[:,None] / aprimeoa * h)**2 * mu[None,:]**2 * sigma_z**2 )
+    sigma_z = sigma_z0 / aexp
+    Fkmu = jnp.exp( -(kmodes[:,None] / aprimeoa)**2 * mu[None,:]**2 * sigma_z**2 )
 
     # thetam already contains 1/ mathcal{H} factor   -f delta = theta
     Pkmu =  (b*deltam[:,None] - mu[None,:]**2 * thetam[:,None])**2 * Fkmu

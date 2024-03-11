@@ -38,9 +38,9 @@ def evolve_background( *, param, thermo_module = 'RECFAST', rtol: float = 1e-5, 
 
     # mean densities
     Omegak = 0.0 #1.0 - Omegam - OmegaL
-    param['grhom'] = 3.33795017e-11 * param['H0']**2    # critical density at z=0 in h^2/Mpc^3
-    param['grhog'] = 1.49594245e-13 * param['Tcmb']**4  # photon density in h^2/Mpc^3
-    param['grhor'] = 3.39739477e-14 * param['Tcmb']**4  # neutrino density per flavour in h^2/Mpc^3
+    param['grhom'] = 3.33795017e-11 * param['H0']**2    # 8πG rho_c / c^2 * in 1/Mpc^2
+    param['grhog'] = 1.49594245e-13 * param['Tcmb']**4  # photon density in 1/Mpc^2
+    param['grhor'] = 3.39739477e-14 * param['Tcmb']**4  # neutrino density per flavour in 1/Mpc^2
     param['adotrad'] = jnp.sqrt((param['grhog']+param['grhor']*(param['Neff']+param['Nmnu'])) / 3.0)
     # param['adotrad'] = 2.8948e-7 * param['Tcmb']**2 # Hubble during radiation domination
 
