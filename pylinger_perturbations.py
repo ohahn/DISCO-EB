@@ -897,7 +897,8 @@ def power_Kaiser( *, y : jax.Array, kmodes : jax.Array, b : float, aexp : float,
     h = param['H0'] / 100.
     sigma_z = sigma_z0 / aexp
     # Fkmu = jnp.exp( -(kmodes[:,None] / aprimeoa)**2 * mu[None,:]**2 * sigma_z**2 )
-    Fkmu = jnp.exp( -(kmodes[:,None] * h/ aprimeoa)**2 * mu[None,:]**2 * sigma_z**2 )
+    # Fkmu = jnp.exp( -(kmodes[:,None] * h/ aprimeoa)**2 * mu[None,:]**2 * sigma_z**2 )
+    Fkmu = jnp.exp( -(kmodes[:,None] *h / aprimeoa)**2 * mu[None,:]**2 * sigma_z0**2 )
 
 
     # thetam already contains 1/ mathcal{H} factor   -f delta = theta
