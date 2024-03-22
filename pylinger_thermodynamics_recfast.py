@@ -117,7 +117,7 @@ def model_recfast( *, tau : float, yin : jnp.array, param : dict ) -> jnp.array:
   """
   rescale = 1.0e-16 #1e-9  # arbitrary rescaling to avoid numerical problems
 
-  a = jnp.exp(yin[0])
+  a    = jnp.exp(yin[0])
   xHep = yin[1]
   xp   = yin[2]
   xe   = xHep + xp
@@ -185,10 +185,15 @@ def model_recfast( *, tau : float, yin : jnp.array, param : dict ) -> jnp.array:
   #   0 = a, 1 = He, 2 = H,  3 = TM
   dlogadtau = a * Hz
   dxHepdtau = a * (-alphaHe*xe*xHep*nHtot + betaHe*(fHe-xHep)*fBHe)*fCHe
+#   dxHepdtau_Saha = a * (-alphaHe*xe*xHep*nHtot + betaHe*(fHe-xHep)*fBHe)
   dxpdtau   = a * (-alphaH*xe*xp*nHtot + betaH*(1.0-xp)*fBH)*fCH
+#   dxpdtau_Saha   = a * (-alphaH*xe*xp*nHtot + betaH*(1.0-xp)*fBH)
 
-#   dxHepdtau = softclip( dxHepdtau, -1e6, 1e6 )
-#   dxpdtau   = softclip( dxpdtau, -1e6, 1e6 )
+#   dxpdtau  = jax.lax.cond( xe > 0.99, lambda x: dxpdtau_Saha, lambda x: dxpdtau, None)
+#   dHepdtau = jax.lax.cond( xe > 0.99, lambda x: dxHepdtau_Saha, lambda x: dxHepdtau, None)
+
+#   dxHepdtau_Saha = softclip( dxHepdtau_Saha, -1e6, 1e6 )
+#   dxpdtau_Saha   = softclip( dxpdtau_Saha, -1e6, 1e6 )
   
   # limit compton term to avoid numerical problems
   # Comp = 8/3 * const_sigmaT * const_aRad / const_me / const_c * TR**4 
@@ -210,7 +215,6 @@ def model_recfast( *, tau : float, yin : jnp.array, param : dict ) -> jnp.array:
   fvec = fvec.at[1].set( dxHepdtau )
   fvec = fvec.at[2].set( dxpdtau )
   fvec = fvec.at[3].set( daTdtau )
-  # fvec = fvec.at[3].set( dTdtau )
 
   # limit xHep to 1e-7 to avoid numerical problems
   # fvec = fvec.at[1].set( jax.lax.cond( jnp.abs(xHep) < 1e-6, lambda x: (1e-7-xHep)/tau, lambda x: fvec[1], None ) )

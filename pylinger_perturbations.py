@@ -856,7 +856,7 @@ def get_power( *, k : jax.Array, y : jax.Array, idx : int , param : dict) -> jax
     return 2 * jnp.pi**2 * param['A_s'] *(k/param['k_p'])**(param['n_s'] - 1) * k**(-3) * y[...,idx]**2
 
 
-def power_Kaiser( *, y : jax.Array, kmodes : jax.Array, b : float, aexp : float, sigma_z0 : float, nmu : int, param ) -> tuple[jax.Array]:
+def power_Kaiser( *, y : jax.Array, kmodes : jax.Array, bias : float, aexp : float, sigma_z0 : float, nmu : int, param ) -> tuple[jax.Array]:
     """ compute the anisotropic power spectrum using the Kaiser formula
     
     Args:
@@ -873,8 +873,8 @@ def power_Kaiser( *, y : jax.Array, kmodes : jax.Array, b : float, aexp : float,
         mu (array_like)      : mu bins
         theta (array_like)   : theta bins, mu = cos(theta)
     """
-    alpha = jnp.linspace(-jnp.pi,jnp.pi,nmu,endpoint=False)
-    mu = jnp.cos( alpha )
+    # alpha = jnp.linspace(-jnp.pi,jnp.pi,nmu,endpoint=False)
+    mu = jnp.linspace(-1,1,nmu) #jnp.cos( alpha )
 
     rhonu = jnp.exp(param['logrhonu_of_loga_spline'].evaluate(jnp.log(aexp)))
     rho_Q = aexp**(-3*(1+param['w_DE_0']+param['w_DE_a'])) * jnp.exp(3*(aexp-1)*param['w_DE_a'])
@@ -894,16 +894,11 @@ def power_Kaiser( *, y : jax.Array, kmodes : jax.Array, b : float, aexp : float,
     thetam = jnp.sqrt(fac *(kmodes/param['k_p'])**(param['n_s'] - 1) * kmodes**(-3)) * y[:,5]
 
     # photo-z error
-    h = param['H0'] / 100.
-    sigma_z = sigma_z0 / aexp
-    # Fkmu = jnp.exp( -(kmodes[:,None] / aprimeoa)**2 * mu[None,:]**2 * sigma_z**2 )
-    # Fkmu = jnp.exp( -(kmodes[:,None] * h/ aprimeoa)**2 * mu[None,:]**2 * sigma_z**2 )
-    Fkmu = jnp.exp( -(kmodes[:,None]  / aprimeoa)**2 * mu[None,:]**2 * sigma_z0**2 )
-
+    Fkmu = jnp.exp( -(kmodes[:,None] / aprimeoa)**2 * mu[None,:]**2 * sigma_z0**2 )
 
     # thetam already contains 1/ mathcal{H} factor   -f delta = theta
-    Pkmu =  (b*deltam[:,None] - mu[None,:]**2 * thetam[:,None])**2 * Fkmu
-    return Pkmu, mu, alpha
+    Pkmu =  (bias*deltam[:,None] - mu[None,:]**2 * thetam[:,None])**2 * Fkmu
+    return Pkmu, mu#, alpha
 
 
 
