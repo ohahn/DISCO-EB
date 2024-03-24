@@ -76,7 +76,8 @@ def evolve_background( *, param, thermo_module = 'RECFAST', rtol: float = 1e-5, 
 
     # ensure curvature is correct
     Omegar = (param['Neff']+param['Nmnu']*jnp.exp(param['logrhonu_of_loga_spline'].evaluate(0.0))) * param['grhor'] / param['grhom']
-    param['OmegaDE'] = 1.0 - param['Omegak'] - Omegar - param['Omegam']
+    Omegag = param['grhog'] / param['grhom']
+    param['OmegaDE'] = 1.0 - param['Omegak'] - Omegar - Omegag - param['Omegam']
 
     # Compute the conformal time interval
     param['taumin'] = amin / param['adotrad']
