@@ -855,8 +855,22 @@ def get_power( *, k : jax.Array, y : jax.Array, idx : int , param : dict) -> jax
     """
     return 2 * jnp.pi**2 * param['A_s'] *(k/param['k_p'])**(param['n_s'] - 1) * k**(-3) * y[...,idx]**2
 
+def get_aprimeoa( *, param, aexp ):
+    rhonu = jnp.exp(param['logrhonu_of_loga_spline'].evaluate(jnp.log(aexp)))
+    rho_Q = aexp**(-3*(1+param['w_DE_0']+param['w_DE_a'])) * jnp.exp(3*(aexp-1)*param['w_DE_a'])
+    
+    # ... background energy density
+    grho = (
+        param['grhom'] * param['Omegam'] / aexp
+        + (param['grhog'] + param['grhor'] * (param['Neff'] + param['Nmnu'] * rhonu)) / aexp**2
+        + param['grhom'] * param['OmegaDE'] * rho_Q * aexp**2
+        + param['grhom'] * param['Omegak']
+    )
+    
+    aprimeoa = jnp.sqrt(grho / 3.0)
+    return aprimeoa
 
-def power_Kaiser( *, y : jax.Array, kmodes : jax.Array, bias : float, aexp : float, sigma_z0 : float, nmu : int, param ) -> tuple[jax.Array]:
+def power_Kaiser( *, y : jax.Array, kmodes : jax.Array, bias : float, aexp : float, sigma_z0 : float, nmu : int, param, param_fiducial = None ) -> tuple[jax.Array]:
     """ compute the anisotropic power spectrum using the Kaiser formula
     
     Args:
@@ -873,32 +887,29 @@ def power_Kaiser( *, y : jax.Array, kmodes : jax.Array, bias : float, aexp : flo
         mu (array_like)      : mu bins
         theta (array_like)   : theta bins, mu = cos(theta)
     """
-    # alpha = jnp.linspace(-jnp.pi,jnp.pi,nmu,endpoint=False)
-    mu = jnp.linspace(-1,1,nmu) #jnp.cos( alpha )
+    mu = jnp.linspace(-1,1,nmu)
+    h = param['h']
 
-    rhonu = jnp.exp(param['logrhonu_of_loga_spline'].evaluate(jnp.log(aexp)))
-    rho_Q = aexp**(-3*(1+param['w_DE_0']+param['w_DE_a'])) * jnp.exp(3*(aexp-1)*param['w_DE_a'])
-    
-    # ... background energy density
-    grho = (
-        param['grhom'] * param['Omegam'] / aexp
-        + (param['grhog'] + param['grhor'] * (param['Neff'] + param['Nmnu'] * rhonu)) / aexp**2
-        + param['grhom'] * param['OmegaDE'] * rho_Q * aexp**2
-        + param['grhom'] * param['Omegak']
-    )
-    
-    aprimeoa = jnp.sqrt(grho / 3.0)
+    if param_fiducial==None:
+        aprimeoa = get_aprimeoa( param=param, aexp=aexp )
+    else:
+        h_fiducial = param_fiducial['h']
+        aprimeoa = get_aprimeoa( param=param_fiducial, aexp=aexp ) * h / h_fiducial
 
     fac = 2 * jnp.pi**2 * param['A_s']
     deltam = jnp.sqrt(fac *(kmodes/param['k_p'])**(param['n_s'] - 1) * kmodes**(-3)) * y[:,4]
     thetam = jnp.sqrt(fac *(kmodes/param['k_p'])**(param['n_s'] - 1) * kmodes**(-3)) * y[:,5]
 
-    # photo-z error
+    # photo-z error, cut-off position does not depend on expansion history
+    # consider this remark from arXiv:1910.09273
+    #  "We note that the damping due to redshift errors does not vary with changes in the 
+    #   expansion history, since k_\parallel \propto H(z) and \sigma_r \propto 1/H(z)"
+    # so H=aprimeoa is the fiducial one, but kmodes also needs to be rescaled by k/h*h_fiducial
     Fkmu = jnp.exp( -(kmodes[:,None] / aprimeoa)**2 * mu[None,:]**2 * sigma_z0**2 )
 
     # thetam already contains 1/ mathcal{H} factor   -f delta = theta
-    Pkmu =  (bias*deltam[:,None] - mu[None,:]**2 * thetam[:,None])**2 * Fkmu
-    return Pkmu, mu#, alpha
+    Pkmu = (bias*deltam[:,None] - mu[None,:]**2 * thetam[:,None])**2 * Fkmu
+    return Pkmu, mu
 
 
 
