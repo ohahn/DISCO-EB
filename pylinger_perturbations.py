@@ -870,7 +870,7 @@ def get_aprimeoa( *, param, aexp ):
     aprimeoa = jnp.sqrt(grho / 3.0)
     return aprimeoa
 
-def power_Kaiser( *, y : jax.Array, kmodes : jax.Array, bias : float, aexp : float, sigma_z0 : float, nmu : int, param, param_fiducial = None ) -> tuple[jax.Array]:
+def power_Kaiser( *, y : jax.Array, kmodes : jax.Array, bias : float, aexp : float, nmu : int, param ) -> tuple[jax.Array]:
     """ compute the anisotropic power spectrum using the Kaiser formula
     
     Args:
@@ -888,27 +888,13 @@ def power_Kaiser( *, y : jax.Array, kmodes : jax.Array, bias : float, aexp : flo
         theta (array_like)   : theta bins, mu = cos(theta)
     """
     mu = jnp.linspace(-1,1,nmu)
-    h = param['h']
-
-    if param_fiducial==None:
-        aprimeoa = get_aprimeoa( param=param, aexp=aexp )
-    else:
-        h_fiducial = param_fiducial['h']
-        aprimeoa = get_aprimeoa( param=param_fiducial, aexp=aexp ) * h / h_fiducial
-
+    
     fac = 2 * jnp.pi**2 * param['A_s']
     deltam = jnp.sqrt(fac *(kmodes/param['k_p'])**(param['n_s'] - 1) * kmodes**(-3)) * y[:,4]
     thetam = jnp.sqrt(fac *(kmodes/param['k_p'])**(param['n_s'] - 1) * kmodes**(-3)) * y[:,5]
 
-    # photo-z error, cut-off position does not depend on expansion history
-    # consider this remark from arXiv:1910.09273
-    #  "We note that the damping due to redshift errors does not vary with changes in the 
-    #   expansion history, since k_\parallel \propto H(z) and \sigma_r \propto 1/H(z)"
-    # so H=aprimeoa is the fiducial one, but kmodes also needs to be rescaled by k/h*h_fiducial
-    Fkmu = jnp.exp( -(kmodes[:,None] / aprimeoa)**2 * mu[None,:]**2 * sigma_z0**2 )
-
     # thetam already contains 1/ mathcal{H} factor   -f delta = theta
-    Pkmu = (bias*deltam[:,None] - mu[None,:]**2 * thetam[:,None])**2 * Fkmu
+    Pkmu = (bias*deltam[:,None] - mu[None,:]**2 * thetam[:,None])**2
     return Pkmu, mu
 
 
