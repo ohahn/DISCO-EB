@@ -1,14 +1,12 @@
-from pylinger_thermodynamics_recfast import compute_thermo as compute_thermo_recfast, evaluate_thermo as evaluate_thermo_recfast
-from pylinger_thermodynamics_mb95 import compute_thermo as compute_thermo_mb95
-from pylinger_cosmo import nu_background
+from .thermodynamics_recfast import compute_thermo as compute_thermo_recfast, evaluate_thermo as evaluate_thermo_recfast
+from .thermodynamics_mb95 import compute_thermo as compute_thermo_mb95
+from .cosmo import nu_background
 import jax
 import jax.numpy as jnp
 import diffrax as drx
 import equinox as eqx
 from jax_cosmo.scipy.integrate import romb
 from functools import partial
-
-
 
 
 def a_of_tau( tau_ : float | jax.Array, param : dict ) -> float | jax.Array:

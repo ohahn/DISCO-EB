@@ -5,8 +5,8 @@ import jax.numpy as jnp
 from functools import partial 
 from typing import Tuple
 
-from pylinger_cosmo import dadtau
-from pylinger_util import softclip
+from .cosmo import dadtau
+from .util import softclip
 
 const_c2ok = 1.62581581e4 # K / eV
 const_c_Mpc_s = 9.71561189e-15 # Mpc/s

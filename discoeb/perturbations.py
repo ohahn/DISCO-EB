@@ -1,8 +1,8 @@
 import jax
 import jax.numpy as jnp
 
-from pylinger_util import lngamma_complex_e, root_find_bisect
-from pylinger_cosmo import get_neutrino_momentum_bins
+from .util import lngamma_complex_e, root_find_bisect
+from .cosmo import get_neutrino_momentum_bins
 
 import diffrax as drx
 from jaxtyping import Array, PyTree, Scalar
