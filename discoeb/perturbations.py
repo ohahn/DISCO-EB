@@ -882,7 +882,7 @@ def get_power_smoothed( *, k : jax.Array, y : jax.Array, dlogk : float, idx : in
 
     return Pms
 
-def power_Kaiser( *, y : jax.Array, kmodes : jax.Array, bias : float, mu_sampling : bool = True, nmu : int, param : dict) -> tuple[jax.Array]:
+def power_Kaiser( *, y : jax.Array, kmodes : jax.Array, bias : float, mu_sampling : bool = True, smooth_dlogk : float = None, nmu : int, param : dict) -> tuple[jax.Array]:
     """ compute the anisotropic power spectrum using the Kaiser formula
     
     Args:
@@ -890,6 +890,7 @@ def power_Kaiser( *, y : jax.Array, kmodes : jax.Array, bias : float, mu_samplin
         kmodes (array_like)  : the list of wave numbers in units of [1/Mpc]
         bias (float)         : linear tracer bias
         mu_sampling (bool)   : if True, sample the mu bins, else sample the theta bins
+        smooth_dlogk (float) : if not None, use Savitzky-Golay smoothing at this log scale
         sigma_z0 (float)     : redshift error sigma_z = sigma_z0 * (1+z)
         nmu (int)            : number of mu bins
         param (dict)         : dictionary of all data
@@ -906,9 +907,15 @@ def power_Kaiser( *, y : jax.Array, kmodes : jax.Array, bias : float, mu_samplin
         theta = jnp.linspace(0,jnp.pi,nmu)
         mu = jnp.cos(theta)
     
-    fac = 2 * jnp.pi**2 * param['A_s']
-    deltam = jnp.sqrt(fac *(kmodes/param['k_p'])**(param['n_s'] - 1) * kmodes**(-3)) * y[:,4]
-    thetam = jnp.sqrt(fac *(kmodes/param['k_p'])**(param['n_s'] - 1) * kmodes**(-3)) * y[:,5]
+    if smooth_dlogk is None:
+        fac = 2 * jnp.pi**2 * param['A_s']
+        deltam = jnp.sqrt(fac *(kmodes/param['k_p'])**(param['n_s'] - 1) * kmodes**(-3)) * y[:,4]
+        thetam = jnp.sqrt(fac *(kmodes/param['k_p'])**(param['n_s'] - 1) * kmodes**(-3)) * y[:,5]
+    else:
+        Pdelta = get_power_smoothed( y=y, k=kmodes, dlogk=smooth_dlogk, idx=4, param=param )
+        Ptheta = get_power_smoothed( y=y, k=kmodes, dlogk=smooth_dlogk, idx=4, param=param )
+        deltam = jnp.sqrt(Pdelta)
+        thetam = -jnp.sqrt(Ptheta)
 
     # thetam already contains 1/ mathcal{H} factor   -f delta = theta
     Pkmu = (bias*deltam[:,None] - mu[None,:]**2 * thetam[:,None])**2

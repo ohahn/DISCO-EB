@@ -110,7 +110,7 @@ def savgol_filter( *, y : jax.Array, window_length : int, polyorder : int ) -> j
   A = x ** order
 
   Y = jnp.zeros(polyorder + 1)
-  Y[0] = 1.0
+  Y = Y.at[0].set( 1.0 )
 
   # Find the least-squares solution of A*c = y
   coeffs, _, _, _ = jnp.linalg.lstsq(A, Y)
