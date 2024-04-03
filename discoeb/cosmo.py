@@ -117,9 +117,19 @@ def dadtau(a, param ):
     return jnp.sqrt(grho2 / 3.0).reshape( jnp.asarray(a).shape )
 
 def dtauda(a, param ):
+    """Derivative of conformal time with respect to scale factor"""
     return 1/dadtau(a, param)
 
 def get_aprimeoa( *, param, aexp ):
+    """Compute the conformal Hubble function
+
+    Args:
+        param (dict): dictionary of cosmological parameters
+        aexp (float): scale factor
+
+    Returns:
+        float: conformal H(a)
+    """
     rhonu = jnp.exp(param['logrhonu_of_loga_spline'].evaluate(jnp.log(aexp)))
     rho_Q = aexp**(-3*(1+param['w_DE_0']+param['w_DE_a'])) * jnp.exp(3*(aexp-1)*param['w_DE_a'])
     
@@ -133,3 +143,19 @@ def get_aprimeoa( *, param, aexp ):
     
     aprimeoa = jnp.sqrt(grho / 3.0)
     return aprimeoa
+
+
+def compute_angular_diameter_distance( *, aexp, param ):
+    """Compute the angular diameter distance
+
+    Args:
+        aexp (float): scale factor
+        param (dict): dictionary of cosmological parameters
+
+    Returns:
+        float: angular diameter distance
+    """
+    aexpv = jnp.linspace( aexp, 1.0, 1000 )
+    aH = get_aprimeoa( param=param, aexp=aexpv ) * aexpv
+    Da = aexp * integrate_trapz( 1/aH, aexpv)
+    return Da
