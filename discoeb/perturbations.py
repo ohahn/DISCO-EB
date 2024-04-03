@@ -913,7 +913,7 @@ def power_Kaiser( *, y : jax.Array, kmodes : jax.Array, bias : float, mu_samplin
         thetam = jnp.sqrt(fac *(kmodes/param['k_p'])**(param['n_s'] - 1) * kmodes**(-3)) * y[:,5]
     else:
         Pdelta = get_power_smoothed( y=y, k=kmodes, dlogk=smooth_dlogk, idx=4, param=param )
-        Ptheta = get_power_smoothed( y=y, k=kmodes, dlogk=smooth_dlogk, idx=4, param=param )
+        Ptheta = get_power_smoothed( y=y, k=kmodes, dlogk=smooth_dlogk, idx=5, param=param )
         deltam = jnp.sqrt(Pdelta)
         thetam = -jnp.sqrt(Ptheta)
 
