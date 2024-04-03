@@ -1,8 +1,8 @@
 import jax
 import jax.numpy as jnp
 
-from .util import lngamma_complex_e, root_find_bisect
-from .cosmo import get_neutrino_momentum_bins
+from .util import lngamma_complex_e, root_find_bisect, savgol_filter
+from .cosmo import get_neutrino_momentum_bins, get_aprimeoa
 
 import diffrax as drx
 from jaxtyping import Array, PyTree, Scalar
@@ -855,20 +855,23 @@ def get_power( *, k : jax.Array, y : jax.Array, idx : int , param : dict) -> jax
     """
     return 2 * jnp.pi**2 * param['A_s'] *(k/param['k_p'])**(param['n_s'] - 1) * k**(-3) * y[...,idx]**2
 
-def get_aprimeoa( *, param, aexp ):
-    rhonu = jnp.exp(param['logrhonu_of_loga_spline'].evaluate(jnp.log(aexp)))
-    rho_Q = aexp**(-3*(1+param['w_DE_0']+param['w_DE_a'])) * jnp.exp(3*(aexp-1)*param['w_DE_a'])
+
+def get_power_smoothed( *, k : jax.Array, y : jax.Array, dlogk : float, idx : int , param : dict) -> jax.Array:
+    """ compute the power spectrum from the perturbations
     
-    # ... background energy density
-    grho = (
-        param['grhom'] * param['Omegam'] / aexp
-        + (param['grhog'] + param['grhor'] * (param['Neff'] + param['Nmnu'] * rhonu)) / aexp**2
-        + param['grhom'] * param['OmegaDE'] * rho_Q * aexp**2
-        + param['grhom'] * param['Omegak']
-    )
-    
-    aprimeoa = jnp.sqrt(grho / 3.0)
-    return aprimeoa
+    Args:
+        k (array_like)   : the wavenumbers [in units 1/Mpc]
+        y (array_like)   : the perturbations
+        dlogk (float)    : the log bin width (dlogk = 1.0)
+        idx (int)        : index of the perturbation to compute the power spectrum for
+        param (dict)     : dictionary of all parameters
+        
+    Returns:
+        Pk (array_like)  : the power spectrum
+    """
+    Pk = get_power( k=k, y=y, idx=idx, param=param )
+    window_length = round(dlogk/(k[1]-k[0]))
+    return jax.exp(savgol_filter(jnp.log(Pk), window_length=window_length, polyorder=3))
 
 def power_Kaiser( *, y : jax.Array, kmodes : jax.Array, bias : float, aexp : float, nmu : int, param ) -> tuple[jax.Array]:
     """ compute the anisotropic power spectrum using the Kaiser formula

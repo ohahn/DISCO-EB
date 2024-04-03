@@ -76,3 +76,41 @@ def softclip(x, a_min, a_max):
     """
     y = jnp.clip(x, a_min, a_max)
     return jnp.where(x < a_min, a_min + jnp.log(jnp.abs(x - a_min) + 1) * jnp.sign(x - a_min), jnp.where(x > a_max, a_max + jnp.log(jnp.abs(x - a_max) + 1) * jnp.sign(x - a_max), y))
+
+
+def savgol_filter( *, y : jax.Array, window_length : int, polyorder : int ) -> jax.Array:
+    """ Savitzky-Golay filter for 1D data.
+    
+    Args:
+        y (array_like)          : the input array
+        window_length (int)     : the length of the filter window
+        polyorder (int)         : the order of the polynomial
+        
+    Returns:
+        y_smoothed (array_like) : the smoothed array
+    """
+    if window_length % 2 == 0:
+        raise ValueError('window_length must be odd')
+    if window_length < polyorder + 2:
+        raise ValueError('window_length is too small for the polynomials order')
+    if window_length > y.shape[0]:
+        raise ValueError('window_length is too large for input array')
+    if polyorder > window_length:
+        raise ValueError('polyorder is too large for the window length')
+    if polyorder < 1:
+        raise ValueError('polyorder must be non-negative')
+    
+    # Precompute the coefficients
+    b = jnp.array([(-1)**i for i in range(polyorder+1)])
+    A = jnp.vander(jnp.linspace(-1, 1, window_length), polyorder+1)
+    AT = jnp.transpose(A)
+    ATA = jnp.dot(AT, A)
+    ATb = jnp.dot(AT, b)
+    c = jnp.linalg.solve(ATA, ATb)
+    
+    # Apply the filter
+    y_smoothed = jnp.zeros_like(y)
+    for i in range(window_length//2, y.shape[0]-window_length//2):
+        y_smoothed = jax.ops.index_update(y_smoothed, i, jnp.dot(c, y[i-window_length//2:i+window_length//2+1]))
+    
+    return y_smoothed

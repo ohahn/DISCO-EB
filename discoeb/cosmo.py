@@ -110,3 +110,18 @@ def dadtau(a, param ):
 
 def dtauda(a, param ):
     return 1/dadtau(a, param)
+
+def get_aprimeoa( *, param, aexp ):
+    rhonu = jnp.exp(param['logrhonu_of_loga_spline'].evaluate(jnp.log(aexp)))
+    rho_Q = aexp**(-3*(1+param['w_DE_0']+param['w_DE_a'])) * jnp.exp(3*(aexp-1)*param['w_DE_a'])
+    
+    # ... background energy density
+    grho = (
+        param['grhom'] * param['Omegam'] / aexp
+        + (param['grhog'] + param['grhor'] * (param['Neff'] + param['Nmnu'] * rhonu)) / aexp**2
+        + param['grhom'] * param['OmegaDE'] * rho_Q * aexp**2
+        + param['grhom'] * param['Omegak']
+    )
+    
+    aprimeoa = jnp.sqrt(grho / 3.0)
+    return aprimeoa
