@@ -873,14 +873,14 @@ def get_power_smoothed( *, k : jax.Array, y : jax.Array, dlogk : float, idx : in
     window_length = round(dlogk/(k[1]-k[0]))
     return jax.exp(savgol_filter(jnp.log(Pk), window_length=window_length, polyorder=3))
 
-def power_Kaiser( *, y : jax.Array, kmodes : jax.Array, bias : float, aexp : float, nmu : int, param ) -> tuple[jax.Array]:
+def power_Kaiser( *, y : jax.Array, kmodes : jax.Array, bias : float, mu_sampling : bool = True, nmu : int, param : dict) -> tuple[jax.Array]:
     """ compute the anisotropic power spectrum using the Kaiser formula
     
     Args:
         y (array_like)       : input solution from the EB solver
         kmodes (array_like)  : the list of wave numbers in units of [1/Mpc]
-        b (float)            : linear tracer bias
-        aexp (float)         : scale factor
+        bias (float)         : linear tracer bias
+        mu_sampling (bool)   : if True, sample the mu bins, else sample the theta bins
         sigma_z0 (float)     : redshift error sigma_z = sigma_z0 * (1+z)
         nmu (int)            : number of mu bins
         param (dict)         : dictionary of all data
@@ -890,7 +890,12 @@ def power_Kaiser( *, y : jax.Array, kmodes : jax.Array, bias : float, aexp : flo
         mu (array_like)      : mu bins
         theta (array_like)   : theta bins, mu = cos(theta)
     """
-    mu = jnp.linspace(-1,1,nmu)
+    
+    if mu_sampling:
+        mu = jnp.linspace(-1,1,nmu)
+    else:
+        theta = jnp.linspace(0,jnp.pi,nmu)
+        mu = jnp.cos(theta)
     
     fac = 2 * jnp.pi**2 * param['A_s']
     deltam = jnp.sqrt(fac *(kmodes/param['k_p'])**(param['n_s'] - 1) * kmodes**(-3)) * y[:,4]
