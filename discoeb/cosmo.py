@@ -3,6 +3,14 @@ import jax.numpy as jnp
 import jax_cosmo.scipy.interpolate as jaxinterp
 
 
+# the trapz integration has been moved from jnp to jax.scipy
+# in newer versions of jax, and might disappear altogether
+if hasattr(jnp,'trapz'):
+  integrate_trapz = jnp.trapz
+else:
+  integrate_trapz = jax.scipy.integrate.trapezoid
+
+
 # @partial( jax.jit, static_argnames=('nqmax',) )
 def get_neutrino_momentum_bins(  nqmax : int ) -> tuple[jax.Array, jax.Array]:
     """Get the momentum bins and integral kernel weights for neutrinos
