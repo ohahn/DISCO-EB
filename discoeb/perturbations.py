@@ -857,7 +857,7 @@ def get_power( *, k : jax.Array, y : jax.Array, idx : int , param : dict) -> jax
 
 
 def get_power_smoothed( *, k : jax.Array, y : jax.Array, dlogk : float, idx : int , param : dict) -> jax.Array:
-    """ compute the power spectrum from the perturbations
+    """ compute Savitzky-Golay smoothed version of the power spectrum
     
     Args:
         k (array_like)   : the wavenumbers [in units 1/Mpc]
@@ -869,9 +869,18 @@ def get_power_smoothed( *, k : jax.Array, y : jax.Array, dlogk : float, idx : in
     Returns:
         Pk (array_like)  : the power spectrum
     """
-    Pk = get_power( k=k, y=y, idx=idx, param=param )
-    window_length = round(dlogk/(k[1]-k[0]))
-    return jax.exp(savgol_filter(jnp.log(Pk), window_length=window_length, polyorder=3))
+    window_length = round(dlogk/(jnp.log(k[1])-jnp.log(k[0])))
+    window_length += (window_length+1)%2
+
+    Pm  = get_power( y=y, k=k, idx=idx, param=param )
+
+    Pms = jnp.exp(savgol_filter(y=jnp.log(Pm), window_length=window_length, polyorder=3))
+
+    # replace boundary affected regions with original signal
+    Pms = Pms.at[:window_length//2].set( Pm[:window_length//2] )
+    Pms = Pms.at[-window_length//2:].set( Pm[-window_length//2:] )
+
+    return Pms
 
 def power_Kaiser( *, y : jax.Array, kmodes : jax.Array, bias : float, mu_sampling : bool = True, nmu : int, param : dict) -> tuple[jax.Array]:
     """ compute the anisotropic power spectrum using the Kaiser formula
