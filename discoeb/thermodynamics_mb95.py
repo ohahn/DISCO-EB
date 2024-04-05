@@ -1,6 +1,5 @@
 import jax.lax
 import jax.numpy as jnp
-import numpy as onp
 from typing import Tuple
 from functools import partial
 
@@ -65,7 +64,7 @@ def ionHe(tempb: float, a: float, x0: float, x1: float, x2: float, YHe: float, H
 
     # ... solve coupled equations iteratively
     c = 0.25 * YHe / (1.0 - YHe)
-    err = onp.infty
+    err = jnp.infty
 
     def body_fun(i, vals):
         err, xe, x1, x2 = vals
