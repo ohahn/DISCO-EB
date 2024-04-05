@@ -3,8 +3,6 @@ Implementation of a differentiable linear Einstein-Boltzmann solver for cosmolog
 
 Note that this program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY.
 
-BEWARE: This software package is currently in a beta testing phase! Proceed with caution.
-
 Currently supported features (the list is growing, so check back):
 
 - Autodifferentiable via JAX
