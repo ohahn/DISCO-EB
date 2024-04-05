@@ -12,15 +12,28 @@ Currently supported features (the list is growing, so check back):
   
 New modules/plugins can be easily added (see how to contribute in CONTRIBUTING.md file). We are enthusiastic if extensions/improvements that are of broader interest are re-integrated into the master branch and DISCO-EB grows as a community effort.
 
+## Installation
+
+### Simple Install
+
+```bash
+pip install git+https://github.com/ohahn/DISCO-EB.git
+```
+### For Development
+
+In a fresh virtual environment:
+
+```bash
+git clone https://github.com/ohahn/DISCO-EB.git
+cd DISCO-EB
+pip install -e .
+```
 
 ## Contributing and Licensing
 
 See file CONTRIBUTING.md on how to contribute to the development. 
 
-The software is licensed under GPL v3 (see file LICENSE). 
-
-Please note the separate licensing for Panphasia (see external/panphasia/LICENSE).
-
+The software is licensed under GPL v3 (see file LICENSE).
 
 ## Citing in scientific publications or presentations
 
