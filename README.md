@@ -10,7 +10,7 @@ Currently supported features (the list is growing, so check back):
 - Thermal history solver based on a simplified Recfast implementation in the module
 - Numerous example jupyter notebooks, e.g. for Euclid-like Fisher forecasts
   
-New modules/plugins can be easily added (see how to contribute in CONTRIBUTING.md file)
+New modules/plugins can be easily added (see how to contribute in CONTRIBUTING.md file). We are enthusiastic if extensions/improvements that are of broader interest are re-integrated into the master branch and DISCO-EB grows as a community effort.
 
 
 ## Contributing and Licensing
