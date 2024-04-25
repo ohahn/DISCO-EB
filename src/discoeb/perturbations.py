@@ -589,7 +589,7 @@ def adiabatic_ics_one_mode( *, tau: float, param, kmode, nvar, lmaxg, lmaxgp, lm
     return y
 
 
-def determine_starting_time( *, param, k ):
+def determine_starting_time( *, param, kmode ):
     # ADOPTED from CLASS:
     # largest wavelengths start being sampled when universe is sufficiently opaque. This is quantified in terms of the ratio of thermo to hubble time scales, 
     # \f$ \tau_c/\tau_H \f$. Start when start_largek_at_tau_c_over_tau_h equals this ratio. Decrease this value to start integrating the wavenumbers earlier 
@@ -604,7 +604,7 @@ def determine_starting_time( *, param, k ):
 
     tau0 = param['taumin']
     tau1 = param['tau_of_a_spline'].evaluate( 0.1 ) # don't start after a=0.1
-    tau_k = 1.0/k
+    tau_k = 1.0/kmode
 
     def compute_aprimeoa( a, param ):
         # assume neutrinos fully relativistic and no DE
@@ -687,14 +687,14 @@ def _rms_norm_jvp(x, tx):
     return out, t_out
     
 
-@partial(jax.jit, static_argnames=('lmaxg', 'lmaxgp', 'lmaxr', 'lmaxnu', 'nqmax','max_steps'))
+# @partial(jax.jit, static_argnames=('lmaxg', 'lmaxgp', 'lmaxr', 'lmaxnu', 'nqmax','rtol','atol','pcoeff','icoeff','dcoeff','factormax','factormin','max_steps'))
 def evolve_one_mode( *, tau_max, tau_out, param, kmode, 
                         lmaxg : int, lmaxgp : int, lmaxr : int, lmaxnu : int, \
                         nqmax : int, rtol: float, atol: float,
                         pcoeff : float, icoeff : float, dcoeff : float, factormax : float, factormin : float, max_steps : int  ):
 
     modelX_ = VectorField( 
-        lambda tau, y , params : model_synchronous( tau=tau, y=y, param=params[0], kmode=params[1],  
+        lambda tau, y , args : model_synchronous( tau=tau, y=y, param=args[0], kmode=args[1],  
                                                    lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax) )
     modelX = drx.ODETerm( modelX_ )
     
@@ -702,15 +702,17 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
     nvar   = 7 + (lmaxg + 1) + (lmaxgp + 1) + (lmaxr + 1) + nqmax * (lmaxnu + 1) + 2
 
     # ... determine starting time
-    tau_start = determine_starting_time( param=param, k=kmode )
+    tau_start = determine_starting_time( param=param, kmode=kmode )
     tau_start = 0.99 * jnp.minimum( jnp.min(tau_out), tau_start )
 
     # ... set adiabatic ICs
     y0 = adiabatic_ics_one_mode( tau=tau_start, param=param, kmode=kmode, nvar=nvar, 
                        lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax )
+    
+    kkmode = 0.1
 
     # create solver wrapper, we use the Kvaerno5 solver, which is a 5th order implicit solver
-    def DEsolve_implicit( *, model, t0, t1, y0, saveat ):
+    def DEsolve_implicit( *, model, t0, t1, y0, saveat, kmode ):
         return drx.diffeqsolve(
             terms=model,
             solver=drx.Kvaerno5(),
@@ -719,7 +721,7 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
             dt0=jnp.minimum(t0/4, 0.5*(t1-t0)),
             y0=y0,
             saveat=saveat,  
-            stepsize_controller = drx.PIDController(rtol=rtol, atol=atol, norm=lambda t:rms_norm_filtered(t,jnp.array([0,2,3,5,6,7]), jnp.array([1,kmode**2,1,1,1/kmode**2,1])), 
+            stepsize_controller = drx.PIDController(rtol=rtol, atol=atol, # norm=lambda t:rms_norm_filtered(t,jnp.array([0,2,3,5,6,7]), jnp.array([1,kkmode**2,1,1,1/kkmode**2,1])), 
                                                     pcoeff=pcoeff, icoeff=icoeff, dcoeff=dcoeff, factormax=factormax, factormin=factormin),
             # default controller has icoeff=1, pcoeff=0, dcoeff=0
             max_steps=max_steps,
@@ -731,7 +733,7 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
 
     # solve before neutrinos become fluid
     saveat = drx.SaveAt(ts=tau_out)
-    sol = DEsolve_implicit( model=modelX, t0=tau_start, t1=tau_max, y0=y0, saveat=saveat )
+    sol = DEsolve_implicit( model=modelX, t0=tau_start, t1=tau_max, y0=y0, saveat=saveat, kmode=kmode )
 
     # convert outputs
     yout = jax.vmap( lambda y : convert_to_output_variables( y=y, param=param, kmode=kmode, 
@@ -740,7 +742,7 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
     return yout
 
 
-
+@partial(jax.jit, static_argnames=('kmin', 'kmax', 'num_k','lmaxg', 'lmaxgp', 'lmaxr', 'lmaxnu', 'nqmax','rtol','atol','pcoeff','icoeff','dcoeff','factormax','factormin','max_steps'))
 def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k : int, \
                          lmaxg : int = 11, lmaxgp : int = 11, lmaxr : int = 11, lmaxnu : int = 8, \
                          nqmax : int = 3, rtol: float = 1e-4, atol: float = 1e-4,
@@ -783,18 +785,17 @@ def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k 
         array of shape (num_k) containing the wavenumbers [in units 1/Mpc]
     """
     kmodes = jnp.geomspace(kmin, kmax, num_k)
-    
 
     # determine output times from aexp_out
     tau_out = jax.vmap( lambda a: param['tau_of_a_spline'].evaluate(a) )(aexp_out)
     tau_max = jnp.max(tau_out)
-    nout = aexp_out.shape[0]
-    param['nout'] = nout
     
     # set up ICs and solve ODEs for all the modes
     y1 = jax.vmap(
         lambda k : evolve_one_mode( tau_max=tau_max, tau_out=tau_out, 
-                                    param=param, kmode=k, lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, 
+                                    param=param, 
+                                    kmode=k, 
+                                    lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, 
                                     lmaxnu=lmaxnu, nqmax=nqmax, rtol=rtol, atol=atol,
                                     pcoeff=pcoeff, icoeff=icoeff, dcoeff=dcoeff, 
                                     factormax=factormax, factormin=factormin, max_steps=max_steps ),
