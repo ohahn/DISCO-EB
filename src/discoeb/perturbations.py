@@ -103,6 +103,7 @@ def model_synchronous(*, tau, y, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, nqm
 
     # ... metric
     a = y[0]
+    loga = jnp.log(a)
 
     #ahprime = y[1]
     eta = y[2]
@@ -135,8 +136,8 @@ def model_synchronous(*, tau, y, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, nqm
     # cs2     = param['cs2a_of_tau_spline'].evaluate( tau ) / a
     # xe      = param['xe_of_tau_spline'].evaluate( tau )
 
-    cs2     = param['cs2a_of_tau_spline'].evaluate( param['tau_of_a_spline'].evaluate( a ) ) / a
-    xe      = param['xe_of_tau_spline'].evaluate( param['tau_of_a_spline'].evaluate( a ) )
+    cs2     = param['cs2a_of_loga_spline'].evaluate( loga ) / a
+    xe      = param['xe_of_loga_spline'].evaluate( loga )
     
     # ... Photon mass density over baryon mass density
     photbar = param['grhog'] / (param['grhom'] * param['Omegab'] * a)

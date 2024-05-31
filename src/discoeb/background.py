@@ -88,41 +88,40 @@ def evolve_background( *, param, thermo_module = 'RECFAST', rtol: float = 1e-5, 
     if thermo_module == 'RECFAST':
         # Compute the thermal history
         sol, param = compute_thermo_recfast( param=param )
-
-        # # param['a_of_tau_spline'] = lambda tau : jnp.exp(sol.evaluate( tau )[0])
         param['sol'] = sol
-        # # param['a_of_tau_spline']     = lambda tau : jnp.exp(param['sol'].evaluate( tau )[0])
 
-        # tau  = jnp.geomspace(param['taumin'], param['taumax'], num_thermo)
-        # aexp = jax.vmap( lambda tau_: jnp.exp((param['sol'].evaluate(tau_))[0]), in_axes=0 )( tau )
-        tau  = param['sol'].ts
-        aexp = jnp.exp(param['sol'].ys[:,0])
-
-        param['tau_coeff'] = drx.backward_hermite_coefficients(ts=aexp, ys=tau)
-        param['tau_of_a_spline'] = drx.CubicInterpolation( ts=aexp, coeffs=param['tau_coeff'] )
-
-        param['a_coeff'] = drx.backward_hermite_coefficients(ts=tau, ys=aexp)
-        param['a_of_tau_spline'] = drx.CubicInterpolation( ts=tau, coeffs=param['a_coeff'] )
-
-        param['a'] = aexp
-        param['tau'] = tau
-
-        tau, a, cs2, Tm, mu, xe, xeHI, xeHeI, xeHeII = evaluate_thermo_recfast( param=param, num_thermo=num_thermo )
+        loga, cs2, Tm, _, xe, xeHI, xeHeI, xeHeII, tau = evaluate_thermo_recfast( param=param, num_thermo=num_thermo )
 
         param['xe'] = xe
         param['xeHI'] = xeHI
         param['xeHeI'] = xeHeI
         param['xeHeII'] = xeHeII
-        
+        param['cs2'] = cs2
+        param['tau'] = tau
 
-        param['xe_coeff']  = drx.backward_hermite_coefficients(ts=tau, ys=xe)
-        param['xe_of_tau_spline']    = drx.CubicInterpolation( ts=tau, coeffs=param['xe_coeff'] )
+        tau = jnp.where(loga == jnp.inf, jnp.nan, tau)
+        loga = jnp.where(loga == jnp.inf, jnp.nan, loga)
 
-        param['cs2a_coeff'] = drx.backward_hermite_coefficients(ts=tau, ys=(a*cs2))
-        param['cs2a_of_tau_spline']   = drx.CubicInterpolation( ts=tau, coeffs=param['cs2a_coeff'] )
+        a = jnp.exp(loga)
+        param['a'] = a
 
-        param['tba_coeff']  = drx.backward_hermite_coefficients(ts=tau, ys=(a*Tm))
-        param['tempba_of_tau_spline'] = drx.CubicInterpolation( ts=tau, coeffs=param['tba_coeff'] )
+        param['xe_loga_coeff']  = drx.backward_hermite_coefficients(ts=loga, ys=xe)
+        param['xe_of_loga_spline']    = drx.CubicInterpolation( ts=loga, coeffs=param['xe_loga_coeff'] )
+
+        param['xe_tau_coeff']  = drx.backward_hermite_coefficients(ts=tau, ys=xe)
+        param['xe_of_tau_spline']    = drx.CubicInterpolation( ts=tau, coeffs=param['xe_tau_coeff'] )
+
+        param['cs2a_coeff'] = drx.backward_hermite_coefficients(ts=loga, ys=(a*cs2))
+        param['cs2a_of_loga_spline']   = drx.CubicInterpolation( ts=loga, coeffs=param['cs2a_coeff'] )
+
+        param['tba_coeff']  = drx.backward_hermite_coefficients(ts=loga, ys=(a*Tm))
+        param['tempba_of_loga_spline'] = drx.CubicInterpolation( ts=loga, coeffs=param['tba_coeff'] )
+
+        param['tau_coeff'] = drx.backward_hermite_coefficients(ts=a, ys=tau)
+        param['tau_of_a_spline'] = drx.CubicInterpolation( ts=a, coeffs=param['tau_coeff'] )
+
+        param['a_coeff'] = drx.backward_hermite_coefficients(ts=tau, ys=a)
+        param['a_of_tau_spline'] = drx.CubicInterpolation( ts=tau, coeffs=param['a_coeff'] )
 
 
     elif thermo_module == 'MB95':
