@@ -710,7 +710,7 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
                        lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax )
 
     # create solver wrapper, we use the Kvaerno5 solver, which is a 5th order implicit solver
-    def DEsolve_implicit( *, model, t0, t1, y0, saveat ):
+    def DEsolve_implicit( *, model, t0, t1, y0, saveat, kmode ):
         return drx.diffeqsolve(
             terms=model,
             solver=drx.Kvaerno5(),
@@ -731,7 +731,7 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
 
     # solve before neutrinos become fluid
     saveat = drx.SaveAt(ts=tau_out)
-    sol = DEsolve_implicit( model=modelX, t0=tau_start, t1=tau_max, y0=y0, saveat=saveat )
+    sol = DEsolve_implicit( model=modelX, t0=tau_start, t1=tau_max, y0=y0, saveat=saveat, kmode=kmode )
 
     # convert outputs
     yout = jax.vmap( lambda y : convert_to_output_variables( y=y, param=param, kmode=kmode, 
@@ -842,7 +842,17 @@ def get_xi_from_P( *, k : jnp.array, Pk : jnp.array, N : int, ell : int = 0 ):
 
 
 def get_power( *, k : jax.Array, y : jax.Array, idx : int , param : dict) -> jax.Array:
-    """ compute the power spectrum from the perturbations
+    """ compute the power spectrum from the perturbations, field indices are:
+
+            eta, etaprime, hprime, alpha,       # 0-3
+            deltam,  thetam / (aH),             # 4,5
+            deltabc, thetabc / (aH),            # 6,7
+            deltac,  thetac / (aH),             # 8,9
+            deltab,  thetab / (aH),             # 10,11
+            deltag,  thetag / (aH),             # 12,13
+            deltar,  thetar / (aH),             # 14,15
+            deltanu, thetanu / (aH),            # 16,17
+            deltaq,  thetaq / (aH),             # 18,19
     
     Args:
         k (array_like)   : the wavenumbers [in units 1/Mpc]
@@ -857,7 +867,17 @@ def get_power( *, k : jax.Array, y : jax.Array, idx : int , param : dict) -> jax
 
 
 def get_power_smoothed( *, k : jax.Array, y : jax.Array, dlogk : float, idx : int , param : dict) -> jax.Array:
-    """ compute Savitzky-Golay smoothed version of the power spectrum
+    """ compute Savitzky-Golay smoothed version of the power spectrum, field indices are:
+
+            eta, etaprime, hprime, alpha,       # 0-3
+            deltam,  thetam / (aH),             # 4,5
+            deltabc, thetabc / (aH),            # 6,7
+            deltac,  thetac / (aH),             # 8,9
+            deltab,  thetab / (aH),             # 10,11
+            deltag,  thetag / (aH),             # 12,13
+            deltar,  thetar / (aH),             # 14,15
+            deltanu, thetanu / (aH),            # 16,17
+            deltaq,  thetaq / (aH),             # 18,19
     
     Args:
         k (array_like)   : the wavenumbers [in units 1/Mpc]
