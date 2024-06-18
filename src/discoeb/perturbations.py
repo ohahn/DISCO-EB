@@ -11,6 +11,8 @@ import equinox as eqx
 from functools import partial
 import jax.flatten_util as fu
 
+from .grkt4 import GRKT4
+
 
 # @partial( jax.jit, static_argnames=('nqmax0',) )
 def nu_perturb( a : float, amnu: float, psi0: jax.Array, psi1 : jax.Array, psi2 : jax.Array, nqmax : int ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
@@ -687,7 +689,7 @@ def _rms_norm_jvp(x, tx):
     return out, t_out
     
 
-@partial(jax.jit, static_argnames=('lmaxg', 'lmaxgp', 'lmaxr', 'lmaxnu', 'nqmax','max_steps'))
+# @partial(jax.jit, static_argnames=('lmaxg', 'lmaxgp', 'lmaxr', 'lmaxnu', 'nqmax','max_steps'))
 def evolve_one_mode( *, tau_max, tau_out, param, kmode, 
                         lmaxg : int, lmaxgp : int, lmaxr : int, lmaxnu : int, \
                         nqmax : int, rtol: float, atol: float,
