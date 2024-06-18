@@ -8,7 +8,7 @@ from typing import Tuple
 from .cosmo import dadtau
 from .util import softclip
 
-from discoeb.grkt4 import GRKT4
+from .ode_integrators_stiff import GRKT4
 
 
 const_c2ok = 1.62581581e4 # K / eV

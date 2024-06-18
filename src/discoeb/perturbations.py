@@ -11,7 +11,7 @@ import equinox as eqx
 from functools import partial
 import jax.flatten_util as fu
 
-from .grkt4 import GRKT4
+from .ode_integrators_stiff import Rodas5
 
 
 # @partial( jax.jit, static_argnames=('nqmax0',) )
@@ -46,7 +46,7 @@ def nu_perturb( a : float, amnu: float, psi0: jax.Array, psi1 : jax.Array, psi2 
     return drhonu, dpnu, fnu, shearnu
 
 
-@partial(jax.jit, static_argnames=('lmaxg', 'lmaxgp', 'lmaxr', 'lmaxnu', 'nqmax'))
+# @partial(jax.jit, static_argnames=('lmaxg', 'lmaxgp', 'lmaxr', 'lmaxnu', 'nqmax'))
 def model_synchronous(*, tau, y, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, nqmax ):     
     """Solve the synchronous gauge perturbation equations for a single mode.
 
@@ -715,7 +715,7 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
     def DEsolve_implicit( *, model, t0, t1, y0, saveat, kmode ):
         return drx.diffeqsolve(
             terms=model,
-            solver=drx.Kvaerno5(),
+            solver=Rodas5(),
             t0=t0,
             t1=t1,
             dt0=jnp.minimum(t0/4, 0.5*(t1-t0)),
@@ -806,7 +806,7 @@ def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k 
     return y1, kmodes
 
 
-@partial(jax.jit, static_argnames=('N'))
+# @partial(jax.jit, static_argnames=('N'))
 def get_xi_from_P( *, k : jnp.array, Pk : jnp.array, N : int, ell : int = 0 ):
     """ get the correlation function from the power spectrum  using FFTlog, cf.
         J. D. Talman (1978). JCP, 29:35-48		
