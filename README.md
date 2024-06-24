@@ -29,6 +29,10 @@ cd DISCO-EB
 pip install -e .
 ```
 
+## Getting started
+
+Start with the sample notebook [nb_minimal_example.ipynb](https://github.com/ohahn/DISCO-EB/blob/master/notebooks/nb_minimal_example.ipynb) in the [notebooks subdirectory](https://github.com/ohahn/DISCO-EB/tree/master/notebooks). It explains how to compute a matter power spectrum and take a derivative w.r.t. a cosmological parameter.
+
 ## Contributing and Licensing
 
 See file CONTRIBUTING.md on how to contribute to the development. 
