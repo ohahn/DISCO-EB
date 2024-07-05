@@ -43,7 +43,7 @@ def get_neutrino_momentum_bins(  nqmax : int ) -> tuple[jax.Array, jax.Array]:
     return q, w / fermi_dirac_const 
 
 # @jax.jit
-def nu_background( a : float, amnu: float, nq : int = 1000 ) -> tuple[float, float]:
+def nu_background( a : float, amnu: float, nq : int = 1000 ) -> tuple[float, float, float]:
     """ computes the neutrino density and pressure of one flavour of massive neutrinos
         in units of the mean density of one flavour of massless neutrinos
 
@@ -51,10 +51,10 @@ def nu_background( a : float, amnu: float, nq : int = 1000 ) -> tuple[float, flo
         a (float): scale factor
         amnu (float): neutrino mass in units of neutrino temperature (m_nu*c**2/(k_B*T_nu0).
         nq (int, optional): number of integration points. Defaults to 1000.
-        qmax (float, optional): maximum momentum. Defaults to 30..
+        qmax (float, optional): maximum momentum. Defaults to 30.
 
     Returns:
-        tuple[float, float]: rho_nu/rho_nu0, p_nu/p_nu0
+        tuple[float, float, float]: rho_nu/rho_nu0, p_nu/p_nu0
     """
     qmax = (12 + nq/10)
 
@@ -125,7 +125,7 @@ def get_aprimeoa( *, param, aexp ):
 
     Args:
         param (dict): dictionary of cosmological parameters
-        aexp (float): scale factor
+        aexp (float, jax.Array): scale factor
 
     Returns:
         float: conformal H(a)
