@@ -10,7 +10,9 @@ dependencies = [
     "diffrax==0.4.1",
     "equinox",
     "jaxtyping",
-    "jax_cosmo"
+    "jax_cosmo",
+    "setuptools",
+    "lineax",
 ]
 authors = [
     { name = "Oliver Hahn", email = "oliver.hahn@univie.ac.at" },

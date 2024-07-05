@@ -11,7 +11,9 @@ import equinox as eqx
 from functools import partial
 import jax.flatten_util as fu
 
-from .ode_integrators_stiff import Rodas5
+from .ode_integrators_stiff import Rodas5, Rodas5Transformed
+from diffrax import Kvaerno5
+
 
 
 # @partial( jax.jit, static_argnames=('nqmax0',) )
@@ -715,7 +717,7 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
     def DEsolve_implicit( *, model, t0, t1, y0, saveat, kmode ):
         return drx.diffeqsolve(
             terms=model,
-            solver=Rodas5(),
+            solver=Rodas5Transformed(),
             t0=t0,
             t1=t1,
             dt0=jnp.minimum(t0/4, 0.5*(t1-t0)),
