@@ -27,7 +27,11 @@ classifiers = [
     "Operating System :: POSIX :: Linux",
     "Topic :: Scientific/Engineering :: Astronomy"
 ]
-
+[project.optional-dependencies]
+docs = [
+    "sphinx",
+    "nbsphinx",
+]
 
 [project.urls]
 Homepage = "https://github.com/ohahn/DISCO-EB"
