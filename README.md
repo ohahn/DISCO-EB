@@ -12,6 +12,10 @@ Currently supported features (the list is growing, so check back):
   
 New modules/plugins can be easily added (see how to contribute in CONTRIBUTING.md file). We are enthusiastic if extensions/improvements that are of broader interest are re-integrated into the master branch and DISCO-EB grows as a community effort.
 
+Currently work in progress:
+
+- performance improvements
+
 ## Installation
 
 ### Simple Install
