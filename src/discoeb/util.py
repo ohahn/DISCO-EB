@@ -3,7 +3,7 @@ import jax.numpy as jnp
 
 def lngamma_complex_e( z : complex ):
   """Log[Gamma(z)] for z complex, z not a negative integer Uses complex Lanczos method. Note that the phase part (arg)
-    is not well-determined when |z| is very large, due to inevitable roundoff in restricting to (-Pi,Pi].
+    is not well-determined when `|z|` is very large, due to inevitable roundoff in restricting to (-Pi,Pi].
     -- adapted from GSL --
  
    Args:
