@@ -115,7 +115,7 @@ def Saha_HeII( a, param ):
 
 
 
-def model_recfast( *, logtau : float, yin : jnp.array, param : dict, noiseless_dT : bool = False ) -> jnp.array:
+def model_recfast( *, logtau : float, yin : jnp.ndarray, param : dict, noiseless_dT : bool = False ) -> jnp.ndarray:
   """
     Recombination model from RECFAST (Seager et al. 1999), minor changes from original implementation
   """
@@ -228,7 +228,7 @@ class VectorField(eqx.Module):
 
 # @partial(jax.jit, backend='cpu')
 # @jax.jit
-def compute_thermo( *, param : dict ) -> dict:
+def compute_thermo( *, param : dict ) -> tuple[drx.Solution, dict]:
 
     model = drx.ODETerm(VectorField(
         lambda logtau, y , params : model_recfast( logtau=logtau, yin=y, param=params[0])

@@ -3,7 +3,7 @@ import jax.numpy as jnp
 
 def lngamma_complex_e( z : complex ):
   """Log[Gamma(z)] for z complex, z not a negative integer Uses complex Lanczos method. Note that the phase part (arg)
-    is not well-determined when |z| is very large, due to inevitable roundoff in restricting to (-Pi,Pi].
+    is not well-determined when `|z|` is very large, due to inevitable roundoff in restricting to (-Pi,Pi].
     -- adapted from GSL --
  
    Args:
@@ -248,9 +248,9 @@ def root_find_bisect( *, func, xleft, xright, numit, param ):
   ----------
   func : function
     Function to be evaluated.
-  xleft : float
+  xleft : float, jax.Array
     Left boundary of the interval.
-  xright : float
+  xright : float, jax.Array
     Right boundary of the interval.
   numit : int
     Number of iterations.
@@ -282,7 +282,7 @@ def softclip(x, a_min, a_max):
     return jnp.where(x < a_min, a_min + jnp.log(jnp.abs(x - a_min) + 1) * jnp.sign(x - a_min), jnp.where(x > a_max, a_max + jnp.log(jnp.abs(x - a_max) + 1) * jnp.sign(x - a_max), y))
 
 
-def savgol_filter( *, y : jax.Array, window_length : int, polyorder : int ) -> jax.Array:
+def savgol_filter( *, y : jax.Array, window_length : int|jax.Array, polyorder : int ) -> jax.Array:
   """
   Apply a Savitzky-Golay filter to an array.
 
@@ -290,7 +290,7 @@ def savgol_filter( *, y : jax.Array, window_length : int, polyorder : int ) -> j
   ----------
   y : jax.Array
     Array to be filtered.
-  window_length : int
+  window_length : int, jax.Array
     Length of the filter window.
   polyorder : int
     Order of the polynomial to fit to each window.
