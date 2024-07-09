@@ -47,7 +47,7 @@ The software is licensed under GPL v3 (see file LICENSE).
 
 If you use DISCO-EB in your scientific work, you are required to acknowledge this by linking to this repository and citing the relevant papers:
 
-- Hahn et al. 2024 [arXiv:2311.03291](https://arxiv.org/abs/2311.03291)
+- Hahn et al. 2024 [arXiv:2311.03291](https://arxiv.org/abs/2311.03291) [JCAP OA](https://doi.org/10.1088/1475-7516/2024/06/063)
 
 
 ## Required Python Packages
