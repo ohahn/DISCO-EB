@@ -2,4 +2,4 @@
 docs/_build
 *.egg-info/
 dist/
-/build
+build/

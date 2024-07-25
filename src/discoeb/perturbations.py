@@ -11,6 +11,10 @@ import equinox as eqx
 from functools import partial
 import jax.flatten_util as fu
 
+from .ode_integrators_stiff import Rodas5, Rodas5Transformed
+from diffrax import Kvaerno5
+
+
 
 # @partial( jax.jit, static_argnames=('nqmax0',) )
 def nu_perturb( a : float, amnu: float, psi0: jax.Array, psi1 : jax.Array, psi2 : jax.Array, nqmax : int ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
@@ -44,7 +48,7 @@ def nu_perturb( a : float, amnu: float, psi0: jax.Array, psi1 : jax.Array, psi2 
     return drhonu, dpnu, fnu, shearnu
 
 
-@partial(jax.jit, static_argnames=('lmaxg', 'lmaxgp', 'lmaxr', 'lmaxnu', 'nqmax'))
+# @partial(jax.jit, static_argnames=('lmaxg', 'lmaxgp', 'lmaxr', 'lmaxnu', 'nqmax'))
 def model_synchronous(*, tau, y, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, nqmax ):     
     """Solve the synchronous gauge perturbation equations for a single mode.
 
@@ -485,7 +489,7 @@ def convert_to_output_variables(*, y, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu
     return yout
 
 
-def adiabatic_ics_one_mode( *, tau: float, param, kmode, nvar, lmaxg, lmaxgp, lmaxr, lmaxnu, nqmax ):
+def adiabatic_ics_one_mode( *, tau: float|Array, param, kmode, nvar, lmaxg, lmaxgp, lmaxr, lmaxnu, nqmax ):
     """Initial conditions for adiabatic perturbations"""
     Omegac = param['Omegam'] - param['Omegab']
 
@@ -661,7 +665,7 @@ class VectorField(eqx.Module):
         return self.model(t, y, args)
     
 
-def rms_norm_filtered(x: PyTree, filter_indices: jnp.array, weights: jnp.array) -> Scalar:
+def rms_norm_filtered(x: PyTree, filter_indices: jnp.ndarray, weights: jnp.ndarray) -> Scalar:
     x, _ = fu.ravel_pytree(x)
     if x.size == 0:
         return 0
@@ -687,9 +691,9 @@ def _rms_norm_jvp(x, tx):
     return out, t_out
     
 
-@partial(jax.jit, static_argnames=('lmaxg', 'lmaxgp', 'lmaxr', 'lmaxnu', 'nqmax','max_steps'))
+# @partial(jax.jit, static_argnames=('lmaxg', 'lmaxgp', 'lmaxr', 'lmaxnu', 'nqmax','max_steps'))
 def evolve_one_mode( *, tau_max, tau_out, param, kmode, 
-                        lmaxg : int, lmaxgp : int, lmaxr : int, lmaxnu : int, \
+                        lmaxg : int, lmaxgp : int, lmaxr : int, lmaxnu : int,
                         nqmax : int, rtol: float, atol: float,
                         pcoeff : float, icoeff : float, dcoeff : float, factormax : float, factormin : float, max_steps : int  ):
 
@@ -713,7 +717,7 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
     def DEsolve_implicit( *, model, t0, t1, y0, saveat, kmode ):
         return drx.diffeqsolve(
             terms=model,
-            solver=drx.Kvaerno5(),
+            solver=Rodas5Transformed(),
             t0=t0,
             t1=t1,
             dt0=jnp.minimum(t0/4, 0.5*(t1-t0)),
@@ -741,10 +745,10 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
 
 
 
-def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k : int, \
-                         lmaxg : int = 11, lmaxgp : int = 11, lmaxr : int = 11, lmaxnu : int = 8, \
+def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k : int,
+                         lmaxg : int = 11, lmaxgp : int = 11, lmaxr : int = 11, lmaxnu : int = 8,
                          nqmax : int = 3, rtol: float = 1e-4, atol: float = 1e-4,
-                         pcoeff : float = 0.25, icoeff : float = 0.80, dcoeff : float = 0.0, \
+                         pcoeff : float = 0.25, icoeff : float = 0.80, dcoeff : float = 0.0,
                          factormax : float = 20.0, factormin : float = 0.3, max_steps : int = 2048 ):
     """evolve cosmological perturbations in the synchronous gauge
 
@@ -752,7 +756,7 @@ def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k 
     ----------
     param : dict
         dictionary of parameters and interpolated functions
-    aexp_out : array
+    aexp_out : jnp.ndarray
         array of scale factors at which to output
     kmin : float
         minimum wavenumber [in units 1/Mpc]
@@ -777,9 +781,9 @@ def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k 
 
     Returns
     -------
-    y : array
+    y : jnp.ndarray
         array of shape (num_k, nout, nvar) containing the perturbations
-    k : array
+    k : jnp.ndarray
         array of shape (num_k) containing the wavenumbers [in units 1/Mpc]
     """
     kmodes = jnp.geomspace(kmin, kmax, num_k)
@@ -804,8 +808,8 @@ def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k 
     return y1, kmodes
 
 
-@partial(jax.jit, static_argnames=('N'))
-def get_xi_from_P( *, k : jnp.array, Pk : jnp.array, N : int, ell : int = 0 ):
+# @partial(jax.jit, static_argnames=('N'))
+def get_xi_from_P( *, k : jnp.ndarray, Pk : jnp.ndarray, N : int, ell : int = 0 ):
     """ get the correlation function from the power spectrum  using FFTlog, cf.
         J. D. Talman (1978). JCP, 29:35-48		
         A. J. S. Hamilton (2000).  MNRAS, 312:257-284
@@ -902,7 +906,7 @@ def get_power_smoothed( *, k : jax.Array, y : jax.Array, dlogk : float, idx : in
 
     return Pms
 
-def power_Kaiser( *, y : jax.Array, kmodes : jax.Array, bias : float, mu_sampling : bool = True, smooth_dlogk : float = None, nmu : int, param : dict) -> tuple[jax.Array]:
+def power_Kaiser( *, y : jax.Array, kmodes : jax.Array, bias : float, mu_sampling : bool = True, smooth_dlogk : float = None, nmu : int, param : dict) -> tuple[jax.Array, jax.Array]:
     """ compute the anisotropic power spectrum using the Kaiser formula
     
     Args:
@@ -918,7 +922,6 @@ def power_Kaiser( *, y : jax.Array, kmodes : jax.Array, bias : float, mu_samplin
     Returns:
         P(k,mu) (array_like) : anisotropic spectrum
         mu (array_like)      : mu bins
-        theta (array_like)   : theta bins, mu = cos(theta)
     """
     
     if mu_sampling:
@@ -943,7 +946,7 @@ def power_Kaiser( *, y : jax.Array, kmodes : jax.Array, bias : float, mu_samplin
 
 
 
-def power_multipoles( *, y : jnp.array, kmodes : jnp.array, b : float, param ) -> tuple[jax.Array]:
+def power_multipoles( *, y : jnp.ndarray, kmodes : jnp.ndarray, b : float, param ) -> tuple[jax.Array]:
     """ compute the power spectrum multipoles (l=0,2,4)
 
     Args:

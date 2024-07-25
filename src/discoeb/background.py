@@ -23,10 +23,10 @@ def dtauda_(a, grhom, grhog, grhor, Omegam, OmegaDE, w_DE_0, w_DE_a, Omegak, Nef
     return jnp.sqrt(3.0 / grho2)
 
 
-@partial(jax.jit, static_argnames=('thermo_module',))
+# @partial(jax.jit, static_argnames=('thermo_module',))
 def evolve_background( *, param, thermo_module = 'RECFAST', rtol: float = 1e-5, atol: float = 1e-7, order: int = 5, class_thermo = None ):
     c2ok = 1.62581581e4 # K / eV
-    amin = 1e-9
+    amin = 1e-8
     amax = 1.01
     num_thermo   = 2048 # length of thermal history arrays
     num_neutrino = 512  # number of neutrino history arrays
@@ -51,7 +51,7 @@ def evolve_background( *, param, thermo_module = 'RECFAST', rtol: float = 1e-5, 
 
     
     # Compute the scale factor linearly spaced in log(a)
-    a = jnp.geomspace(amin, amax, num_neutrino)
+    a = jnp.geomspace(amin*0.9, amax*1.1, num_neutrino)
     loga = jnp.log(a)
     param['a'] = a
 
@@ -83,20 +83,29 @@ def evolve_background( *, param, thermo_module = 'RECFAST', rtol: float = 1e-5, 
                                                                  param['Omegam'], param['OmegaDE'], param['w_DE_0'], param['w_DE_a'],
                                                                  param['Omegak'], param['Neff'], param['Nmnu'], 
                                                                  param['logrhonu_of_loga_spline']), amin, amax )
-
     
     if thermo_module == 'RECFAST':
         # Compute the thermal history
         sol, param = compute_thermo_recfast( param=param )
 
-        # # param['a_of_tau_spline'] = lambda tau : jnp.exp(sol.evaluate( tau )[0])
         param['sol'] = sol
+
+        tau, aexp, cs2, Tm, mu, xe, xeHI, xeHeI, xeHeII = evaluate_thermo_recfast( param=param, num_thermo=num_thermo )
+
+        param['aexp'] = aexp
+        param['tau'] = tau
+        param['xe'] = xe
+        param['xeHI'] = xeHI
+        param['xeHeI'] = xeHeI
+        param['xeHeII'] = xeHeII
+        param['cs2'] = cs2
+
+        # # param['a_of_tau_spline'] = lambda tau : jnp.exp(sol.evaluate( tau )[0])
+        
         # # param['a_of_tau_spline']     = lambda tau : jnp.exp(param['sol'].evaluate( tau )[0])
 
         # tau  = jnp.geomspace(param['taumin'], param['taumax'], num_thermo)
         # aexp = jax.vmap( lambda tau_: jnp.exp((param['sol'].evaluate(tau_))[0]), in_axes=0 )( tau )
-        tau  = param['sol'].ts
-        aexp = jnp.exp(param['sol'].ys[:,0])
 
         param['tau_coeff'] = drx.backward_hermite_coefficients(ts=aexp, ys=tau)
         param['tau_of_a_spline'] = drx.CubicInterpolation( ts=aexp, coeffs=param['tau_coeff'] )
@@ -104,26 +113,14 @@ def evolve_background( *, param, thermo_module = 'RECFAST', rtol: float = 1e-5, 
         param['a_coeff'] = drx.backward_hermite_coefficients(ts=tau, ys=aexp)
         param['a_of_tau_spline'] = drx.CubicInterpolation( ts=tau, coeffs=param['a_coeff'] )
 
-        param['a'] = aexp
-        param['tau'] = tau
-
-        tau, a, cs2, Tm, mu, xe, xeHI, xeHeI, xeHeII = evaluate_thermo_recfast( param=param, num_thermo=num_thermo )
-
-        param['xe'] = xe
-        param['xeHI'] = xeHI
-        param['xeHeI'] = xeHeI
-        param['xeHeII'] = xeHeII
-        
-
         param['xe_coeff']  = drx.backward_hermite_coefficients(ts=tau, ys=xe)
         param['xe_of_tau_spline']    = drx.CubicInterpolation( ts=tau, coeffs=param['xe_coeff'] )
 
-        param['cs2a_coeff'] = drx.backward_hermite_coefficients(ts=tau, ys=(a*cs2))
+        param['cs2a_coeff'] = drx.backward_hermite_coefficients(ts=tau, ys=(aexp*cs2))
         param['cs2a_of_tau_spline']   = drx.CubicInterpolation( ts=tau, coeffs=param['cs2a_coeff'] )
 
-        param['tba_coeff']  = drx.backward_hermite_coefficients(ts=tau, ys=(a*Tm))
+        param['tba_coeff']  = drx.backward_hermite_coefficients(ts=tau, ys=(aexp*Tm))
         param['tempba_of_tau_spline'] = drx.CubicInterpolation( ts=tau, coeffs=param['tba_coeff'] )
-
 
     elif thermo_module == 'MB95':
 

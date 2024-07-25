@@ -64,7 +64,7 @@ def ionHe(tempb: float, a: float, x0: float, x1: float, x2: float, YHe: float, H
 
     # ... solve coupled equations iteratively
     c = 0.25 * YHe / (1.0 - YHe)
-    err = jnp.infty
+    err = jnp.inf
 
     def body_fun(i, vals):
         err, xe, x1, x2 = vals
@@ -89,7 +89,7 @@ def ionHe(tempb: float, a: float, x0: float, x1: float, x2: float, YHe: float, H
     return x1, x2
 
 
-@partial(jax.jit, static_argnames=("nthermo",))
+# @partial(jax.jit, static_argnames=("nthermo",))
 def compute_thermo(*, param, nthermo: int):
     # Output: a, adot, tau, tb, xe_raw, xe, xHeI, xHeII, cs2
     tau0    = param['taumin']
