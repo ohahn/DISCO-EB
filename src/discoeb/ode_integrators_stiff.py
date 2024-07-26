@@ -609,3 +609,154 @@ class Rodas5Transformed(AbstractAdaptiveSolver):
         args: Args,
     ) -> VF:
         return terms.vf(t0, y0, args)
+    
+
+  
+class Rodas5Batched(AbstractAdaptiveSolver):
+    r"""Rodas5 method.
+    """
+
+    term_structure: ClassVar = AbstractTerm
+    interpolation_cls: ClassVar[
+         Callable[..., LocalLinearInterpolation]
+    ] = LocalLinearInterpolation
+
+    def order(self, terms):
+        return 5
+
+    def strong_order(self, terms):
+        return None
+
+    def init(
+        self,
+        terms: AbstractTerm,
+        t0: RealScalarLike,
+        t1: RealScalarLike,
+        y0: Y,
+        args: Args,
+    ) -> _SolverState:
+        return None
+
+    def step(
+        self,
+        terms: AbstractTerm,
+        t0: RealScalarLike,
+        t1: RealScalarLike,
+        y0: Y,
+        args: Args,
+        solver_state: _SolverState,
+        made_jump: BoolScalarLike,
+    ) -> tuple[Y, _ErrorEstimate, DenseInfo, _SolverState, RESULTS]:
+        del solver_state, made_jump
+
+        n  = y0[0].shape[0]
+        dt = terms.contr(t0, t1)
+
+        # Precalculations
+        dtC21 = C21/dt
+        dtC31 = C31/dt
+        dtC32 = C32/dt
+        dtC41 = C41/dt
+        dtC42 = C42/dt
+        dtC43 = C43/dt
+        dtC51 = C51/dt
+        dtC52 = C52/dt
+        dtC53 = C53/dt
+        dtC54 = C54/dt
+        dtC61 = C61/dt
+        dtC62 = C62/dt
+        dtC63 = C63/dt
+        dtC64 = C64/dt
+        dtC65 = C65/dt
+        dtC71 = C71/dt
+        dtC72 = C72/dt
+        dtC73 = C73/dt
+        dtC74 = C74/dt
+        dtC75 = C75/dt
+        dtC76 = C76/dt
+        dtC81 = C81/dt
+        dtC82 = C82/dt
+        dtC83 = C83/dt
+        dtC84 = C84/dt
+        dtC85 = C85/dt
+        dtC86 = C86/dt
+        dtC87 = C87/dt
+
+        dtd1 = dt*d1
+        dtd2 = dt*d2
+        dtd3 = dt*d3
+        dtd4 = dt*d4
+        dtd5 = dt*d5
+        dtgamma = dt*gamma
+
+        # calculate and invert W
+        I  = jnp.eye(n)
+
+        def f( _t, _y, _a):
+            return terms.vf(_t,
+                            jnp.stack([_y] + [jnp.zeros_like(_y)]*(n-1)), 
+                            jnp.stack([_a] + [jnp.zeros_like(_a)]*(n-1)))[0]
+
+        dt_f_batched = jax.vmap(lambda _t, _y, _a: jax.jacobian(lambda __t: f(__t, _y, _a))(_t), (None, 0, 0)) 
+        jac_f_batched = jax.vmap(lambda _t, _y, _a: jax.jacobian(lambda __y: f(_t, __y, _a))(_y),(None, 0, 0)) 
+        lu_batched = jax.vmap(lambda a: jax.scipy.linalg.lu_factor(I/dtgamma - a), (0,))
+
+        dT = dt_f_batched(t0, y0, args)
+        jac_blocks = jac_f_batched(t0, y0, args)
+        LU, piv = lu_batched(jac_blocks)        
+
+        dy1 = terms.vf(t=t0, y=y0, args=args)
+        rhs = dy1 + dtd1*dT
+        k1 = jax.scipy.linalg.lu_solve( (LU, piv), rhs )
+
+        u = y0 + a21*k1
+        du = terms.vf(t=t0 + c2*dt, y=u, args=args)
+        rhs = du + dtd2*dT + dtC21*k1
+        k2 = jax.scipy.linalg.lu_solve( (LU, piv), rhs )
+
+        u = y0 + a31*k1 + a32*k2
+        du = terms.vf(t=t0 + c3*dt, y=u, args=args)
+        rhs = du + dtd3*dT + (dtC31*k1 + dtC32*k2)
+        k3 = jax.scipy.linalg.lu_solve( (LU, piv), rhs )
+
+        u = y0 + a41*k1 + a42*k2 + a43*k3
+        du = terms.vf(t=t0 + c4*dt, y=u, args=args)
+        rhs = du + dtd4*dT + (dtC41*k1 + dtC42*k2 + dtC43*k3)
+        k4 = jax.scipy.linalg.lu_solve( (LU, piv), rhs )
+
+        u = y0 + a51*k1 + a52*k2 + a53*k3 + a54*k4
+        du = terms.vf(t=t0 + c5*dt, y=u, args=args)
+        rhs = du + dtd5*dT + (dtC51*k1 + dtC52*k2 + dtC53*k3 + dtC54*k4)
+        k5 = jax.scipy.linalg.lu_solve( (LU, piv), rhs )
+
+        u = y0 + a61*k1 + a62*k2 + a63*k3 + a64*k4 + a65*k5
+        du = terms.vf(t=t0 + dt, y=u, args=args)
+        rhs = du + (dtC61*k1 + dtC62*k2 + dtC63*k3 + dtC64*k4 + dtC65*k5)
+        k6 = jax.scipy.linalg.lu_solve( (LU, piv), rhs )
+
+        u = u + k6 
+        du = terms.vf(t=t0 + dt, y=u, args=args)
+        rhs = du + (dtC71*k1 + dtC72*k2 + dtC73*k3 + dtC74*k4 + dtC75*k5 + dtC76*k6)
+        k7 = jax.scipy.linalg.lu_solve( (LU, piv), rhs)
+
+        u = u + k7 
+        du = terms.vf(t=t0 + dt, y=u, args=args)
+        rhs = du + (dtC81*k1 + dtC82*k2 + dtC83*k3 + dtC84*k4 + dtC85*k5 + dtC86*k6 + dtC87*k7)
+        k8 = jax.scipy.linalg.lu_solve( (LU, piv), rhs)
+
+        y1 = u + k8
+        du = terms.vf(t=t0 + dt, y=u, args=args)
+
+
+
+        dense_info = dict(y0=y0, y1=y1 ) # for cubic spine inetrpolator:, k0=dy1, k1=du)
+        return y1, k8, dense_info, None, RESULTS.successful
+
+    def func(
+        self,
+        terms: AbstractTerm,
+        t0: RealScalarLike,
+        y0: Y,
+        args: Args,
+    ) -> VF:
+        return terms.vf(t0, y0, args)
