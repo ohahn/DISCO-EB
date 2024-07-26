@@ -665,13 +665,14 @@ class VectorField(eqx.Module):
         return self.model(t, y, args)
 
 def rms_norm_filtered_batched(x: PyTree, filter_indices: jnp.ndarray, weights: list[jnp.ndarray]) -> Scalar:
-    # The filters are passed in a batched manner here, so filters are list of ndarray
-    # It is also assumed that x has the same pytree structure as weights
-    x_ = jax.vmap(lambda x, w: x[filter_indices] * w)(x, weights)
-    x_weighted, _ = fu.ravel_pytree(x_)
-    if x.size == 0:
-        return 0
-    return _rms_norm(x_weighted)
+    
+    xs_weighted = jax.vmap(lambda _x, _w: _x[filter_indices] * _w, (0, 0))(x, jnp.array(weights))
+    x_, _ = fu.ravel_pytree(xs_weighted)
+    return _rms_norm(x_)
+
+    # norms = jax.vmap(_rms_norm)(xs_weighted)
+
+    # return jnp.max(norms)
 
 
 def rms_norm_filtered(x: PyTree, filter_indices: jnp.ndarray, weights: jnp.ndarray) -> Scalar:
@@ -758,30 +759,35 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
 def determine_start_times_per_batch(tau_out, param, kmodes, batch_size):
     n_total = len(kmodes)
 
-     # ... determine starting times for each mode
-    determine_all_starting_times = jax.vmap(determine_starting_time, (None, 0))
+    # starting time for one moda:
+    def starting_time_one_mode(p, k):
+        tau_start = determine_starting_time( param=p, k=k )
+        tau_start = 0.99 * jnp.minimum( jnp.min(tau_out), tau_start )
 
-    tau_start = determine_all_starting_times( param=param, k=kmodes )
+        return tau_start
+    
+     # ... determine starting times for each mode
+    tau_start_all_modes = jax.vmap(starting_time_one_mode, (None, 0))( param, kmodes)
 
     # arange the starting times into batches
-    tau_start_batches = jnp.split(tau_start, n_total // batch_size)
-
-    def determine_batch_starting_time(min_tau_out, tau_start_batch):
-        return  0.99 * jnp.minimum(min_tau_out, *tau_start_batch )
-
-    min_tau_out = jnp.min(tau_out)
+    tau_start_batches = jnp.array(jnp.split(tau_start_all_modes, n_total // batch_size))
 
     # finally pick the same starting time for each batch
-    return jax.vmap(determine_batch_starting_time, (None, 0))(min_tau_out, tau_start_batches)
+    return jax.vmap(lambda a: jnp.min(a))(tau_start_batches)
 
 def calculate_ics(tau_start_batched, kmode_batches, param, nvar, lmaxg, lmaxgp, lmaxr, lmaxnu, nqmax):
-     
-     calc_ics_one_batch = jax.vmap(lambda tau_start, kmode: adiabatic_ics_one_mode( tau=tau_start, param=param, kmode=kmode, nvar=nvar, 
-                       lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax ), (None,0))
-     
-     calc_ics_all_batches = jax.vmap(calc_ics_one_batch, (0, 0))
+    
+    def calculate_ic_one_mode(tau_start, kmode):
+        return adiabatic_ics_one_mode( tau=tau_start, param=param, kmode=kmode, nvar=nvar, 
+                       lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax )
 
-     return calc_ics_all_batches(tau_start_batched, kmode_batches)
+    calc_ics_one_batch = jax.vmap(calculate_ic_one_mode, (None, 0))
+     
+    calc_ics_all_batches = jax.vmap(calc_ics_one_batch, (0, 0))
+
+    # assert False, str((jnp.array(tau_start_batched).shape, jnp.array(kmode_batches).shape)) == ((32,), (32, 16))
+
+    return calc_ics_all_batches(jnp.array(tau_start_batched), jnp.array(kmode_batches))
 
 
 # @partial(jax.jit, static_argnames=('lmaxg', 'lmaxgp', 'lmaxr', 'lmaxnu', 'nqmax','max_steps'))
@@ -794,10 +800,10 @@ def evolve_modes_batched( *, tau_max, tau_out, param, kmodes,
 
     n_total = len(kmodes)
 
-    kmode_batches = jnp.split(kmodes, n_total // batch_size)
+    kmode_batches = jnp.array(jnp.split(kmodes, n_total // batch_size))
 
     VF_ = VectorField( 
-        lambda tau, y , params : model_synchronous( tau=tau, y=y, param=params[0], kmode=params[1],  
+        lambda tau, y , kmode: model_synchronous( tau=tau, y=y, param=param, kmode=kmode,  
                                                    lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax) )
     modelX_ = jax.vmap(VF_, (None, 0, 0))
     modelX_term = drx.ODETerm( modelX_ )
@@ -811,16 +817,12 @@ def evolve_modes_batched( *, tau_max, tau_out, param, kmodes,
     # ... set adiabatic ICs for each kmode an batch together
     y0_batches = calculate_ics(tau_start_batched, kmode_batches, param, nvar, lmaxg, lmaxgp, lmaxr, lmaxnu, nqmax)
 
-
-    param_array = jnp.array([param] * len(kmodes))
-    arg_batches = jnp.split(jnp.stack((param_array, kmodes), 1), n_total // batch_size)#
-
     # solve before neutrinos become fluid
     saveat = drx.SaveAt(ts=tau_out)
 
-    # create solver wrapper, we use the Kvaerno5 solver, which is a 5th order implicit solver
-    def DEsolve_implicit( * t0, y0, args ):
-        filters = jnp.vmap(lambda kmode: jnp.array([1,kmode**2,1,1,1/kmode**2,1]))(args[1])
+    # create solver wrapper
+    def DEsolve_implicit(t0, y0, kmodes_batch):
+        filters = jax.vmap(lambda kmode: jnp.array([1,kmode**2,1,1,1/kmode**2,1]))(kmodes_batch)
         return drx.diffeqsolve(
             terms=modelX_term,
             solver=Rodas5Batched(),
@@ -834,7 +836,7 @@ def evolve_modes_batched( *, tau_max, tau_out, param, kmodes,
                                                     pcoeff=pcoeff, icoeff=icoeff, dcoeff=dcoeff, factormax=factormax, factormin=factormin),
             # default controller has icoeff=1, pcoeff=0, dcoeff=0
             max_steps=max_steps,
-            args=args,
+            args=kmodes_batch,
             # adjoint=drx.RecursiveCheckpointAdjoint(), # for backward differentiation
             adjoint=drx.DirectAdjoint(),  #for forward differentiation
             # adjoint=drx.BacksolveAdjoint(), # for backward differentiation
@@ -842,8 +844,8 @@ def evolve_modes_batched( *, tau_max, tau_out, param, kmodes,
 
     DEsolve_implicit_vmap = jax.vmap(DEsolve_implicit, (0,0,0))
 
-    sol_batches = DEsolve_implicit_vmap(t0=tau_start_batched, y0=y0_batches, args=arg_batches )
-    
+    sol_batches = DEsolve_implicit_vmap(tau_start_batched, y0_batches, kmode_batches)
+
     n_batches, n_steps, _batch_size, _nvar = sol_batches.ys.shape
 
     reordered_ys = jnp.reshape(sol_batches.ys, (n_total, n_steps, _nvar))
@@ -972,7 +974,7 @@ def evolve_perturbations_batched( *, param, aexp_out, kmin : float, kmax : float
     param['nout'] = nout
 
     # do all calculations batched in here
-    y1 = evolve_modes_batched(tau_max=tau_max, tau_out=tau_out, param=param, kmode=kmodes, lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, 
+    y1 = evolve_modes_batched(tau_max=tau_max, tau_out=tau_out, param=param, kmodes=kmodes, lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, 
                                     lmaxnu=lmaxnu, nqmax=nqmax, rtol=rtol, atol=atol,
                                     pcoeff=pcoeff, icoeff=icoeff, dcoeff=dcoeff, 
                                     factormax=factormax, factormin=factormin, max_steps=max_steps,
