@@ -789,7 +789,6 @@ def calculate_ics(tau_start_batched, kmode_batches, param, nvar, lmaxg, lmaxgp, 
 
     return calc_ics_all_batches(jnp.array(tau_start_batched), jnp.array(kmode_batches))
 
-
 # @partial(jax.jit, static_argnames=('lmaxg', 'lmaxgp', 'lmaxr', 'lmaxnu', 'nqmax','max_steps'))
 def evolve_modes_batched( *, tau_max, tau_out, param, kmodes, 
                         lmaxg : int, lmaxgp : int, lmaxr : int, lmaxnu : int,
@@ -799,12 +798,17 @@ def evolve_modes_batched( *, tau_max, tau_out, param, kmodes,
                         batch_size: int):
 
     n_total = len(kmodes)
+    n_batches = n_total // batch_size
 
-    kmode_batches = jnp.array(jnp.split(kmodes, n_total // batch_size))
+    kmode_batches = jnp.array(jnp.split(kmodes, n_batches))
 
-    VF_ = VectorField( 
-        lambda tau, y , kmode: model_synchronous( tau=tau, y=y, param=param, kmode=kmode,  
-                                                   lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax) )
+    def F(tau, y, kmode):
+        return model_synchronous( tau=tau, y=y, param=param, kmode=kmode,  
+                                                   lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax)
+
+    # Why this wrapping in a VectorField a.k.a an equinox module? do we ever use the pytree structure of the module?
+    VF_ = VectorField( F )
+
     modelX_ = jax.vmap(VF_, (None, 0, 0))
     modelX_term = drx.ODETerm( modelX_ )
     
@@ -822,6 +826,10 @@ def evolve_modes_batched( *, tau_max, tau_out, param, kmodes,
 
     # create solver wrapper
     def DEsolve_implicit(t0, y0, kmodes_batch):
+
+        # This function now only returns the solution.ys and nothing else, since the other info is not used
+        # at the moment. Might save some memory after compilation?
+
         filters = jax.vmap(lambda kmode: jnp.array([1,kmode**2,1,1,1/kmode**2,1]))(kmodes_batch)
         return drx.diffeqsolve(
             terms=modelX_term,
@@ -832,23 +840,24 @@ def evolve_modes_batched( *, tau_max, tau_out, param, kmodes,
             y0=y0,
             saveat=saveat,  
             stepsize_controller = drx.PIDController(rtol=rtol, atol=atol, 
-                                                    norm=lambda t:rms_norm_filtered_batched(t,jnp.array([0,2,3,5,6,7]), filters), # what to do with this norm?
+                                                    norm=lambda t:rms_norm_filtered_batched(t, jnp.array([0,2,3,5,6,7]), filters), # what to do with this norm?
                                                     pcoeff=pcoeff, icoeff=icoeff, dcoeff=dcoeff, factormax=factormax, factormin=factormin),
             # default controller has icoeff=1, pcoeff=0, dcoeff=0
             max_steps=max_steps,
-            args=kmodes_batch,
+            args=(F, kmodes_batch),
             # adjoint=drx.RecursiveCheckpointAdjoint(), # for backward differentiation
             adjoint=drx.DirectAdjoint(),  #for forward differentiation
             # adjoint=drx.BacksolveAdjoint(), # for backward differentiation
-        )
+        ).ys
+
 
     DEsolve_implicit_vmap = jax.vmap(DEsolve_implicit, (0,0,0))
 
-    sol_batches = DEsolve_implicit_vmap(tau_start_batched, y0_batches, kmode_batches)
+    ys = DEsolve_implicit_vmap(tau_start_batched, y0_batches, kmode_batches)
 
-    n_batches, n_steps, _batch_size, _nvar = sol_batches.ys.shape
+    n_batches, n_steps, _batch_size, _nvar = ys.shape
 
-    reordered_ys = jnp.reshape(sol_batches.ys, (n_total, n_steps, _nvar))
+    reordered_ys = jnp.reshape(ys, (n_total, n_steps, _nvar))
 
     # convert outputs
     def calculate_final_ys( kmode, ys): 

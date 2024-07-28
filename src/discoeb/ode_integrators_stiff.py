@@ -878,6 +878,8 @@ class Rodas5Batched(AbstractAdaptiveSolver):
         made_jump: BoolScalarLike,
     ) -> tuple[Y, _ErrorEstimate, DenseInfo, _SolverState, RESULTS]:
         del solver_state, made_jump
+        
+        f, _args = args
 
         n = y0[0].shape[0]
         dt = terms.contr(t0, t1)
@@ -922,67 +924,83 @@ class Rodas5Batched(AbstractAdaptiveSolver):
         # calculate and invert W
         I = jnp.eye(n)
 
-        def f(_t, _y, _a):
-            return terms.vf(
-                _t, 
-                jnp.stack([_y] + [jnp.zeros_like(_y)] * (n - 1)), 
-                jnp.stack([_a] + [jnp.zeros_like(_a)] * (n - 1))
-                )[0]
 
-        dt_f_batched = jax.vmap(
-            lambda _t, _y, _a: jax.jacobian(lambda __t: f(__t, _y, _a))(_t),
+        # def f(_t, _y, _a):
+        #     return terms.vf(
+        #         _t, 
+        #         jnp.stack([_y] + [jnp.zeros_like(_y)] * (n - 1)), 
+        #         jnp.stack([_a] + [jnp.zeros_like(_a)] * (n - 1))
+        #         )[0]
+        
+        dt_f = jax.jacfwd(f, 0)
+        jac_f = jax.jacfwd(f, 1)
+
+        dt_f_batched = jax.vmap(dt_f,
             in_axes=(None, 0, 0),
         )
-        jac_f_batched = jax.vmap(
-            lambda _t, _y, _a: jax.jacobian(lambda __y: f(_t, __y, _a))(_y),
+        jac_f_batched = jax.vmap(jac_f,
             in_axes=(None, 0, 0),
         )
+
+        # dt_f_batched = jax.vmap(
+        #     lambda _t, _y, _a: jax.jacobian(lambda __t: f(__t, _y, _a))(_t),
+        #     in_axes=(None, 0, 0),
+        # )
+        # jac_f_batched = jax.vmap(
+        #     lambda _t, _y, _a: jax.jacobian(lambda __y: f(_t, __y, _a))(_y),
+        #     in_axes=(None, 0, 0),
+        # )
         lu_batched = jax.vmap(
-            lambda a: jax.scipy.linalg.lu_factor(I / dtgamma - a), in_axes=(0,)
-        )
+            lambda a: jax.scipy.linalg.lu_factor(I / dtgamma - a))
 
-        dT = dt_f_batched(t0, y0, args)
-        jac_blocks = jac_f_batched(t0, y0, args)
-        LU, piv = lu_batched(jac_blocks)
 
-        dy1 = terms.vf(t=t0, y=y0, args=args)
+        dT = dt_f_batched(t0, y0, _args)
+        jac_blocks = jac_f_batched(t0, y0, _args)
+        # LU, piv = jax.lax.map(
+        #      lambda a: jax.scipy.linalg.lu_factor(I / dtgamma - a), jac_blocks)
+
+        lu_and_piv = lu_batched(jac_blocks)
+
+        lu_solve_batched = jax.vmap(jax.scipy.linalg.lu_solve, (0, 0))
+
+        dy1 = terms.vf(t=t0, y=y0, args=_args)
         rhs = dy1 + dtd1 * dT
-        k1 = jax.scipy.linalg.lu_solve((LU, piv), rhs)
+        k1 = lu_solve_batched(lu_and_piv, rhs) # jax.scipy.linalg.lu_solve((LU, piv), rhs)
 
         u = y0 + a21 * k1
-        du = terms.vf(t=t0 + c2 * dt, y=u, args=args)
+        du = terms.vf(t=t0 + c2 * dt, y=u, args=_args)
         rhs = du + dtd2 * dT + dtC21 * k1
-        k2 = jax.scipy.linalg.lu_solve((LU, piv), rhs)
+        k2 = lu_solve_batched(lu_and_piv, rhs)
 
         u = y0 + a31 * k1 + a32 * k2
-        du = terms.vf(t=t0 + c3 * dt, y=u, args=args)
+        du = terms.vf(t=t0 + c3 * dt, y=u, args=_args)
         rhs = du + dtd3 * dT + (dtC31 * k1 + dtC32 * k2)
-        k3 = jax.scipy.linalg.lu_solve((LU, piv), rhs)
+        k3 = lu_solve_batched(lu_and_piv, rhs)
 
         u = y0 + a41 * k1 + a42 * k2 + a43 * k3
-        du = terms.vf(t=t0 + c4 * dt, y=u, args=args)
+        du = terms.vf(t=t0 + c4 * dt, y=u, args=_args)
         rhs = du + dtd4 * dT + (dtC41 * k1 + dtC42 * k2 + dtC43 * k3)
-        k4 = jax.scipy.linalg.lu_solve((LU, piv), rhs)
+        k4 = lu_solve_batched(lu_and_piv, rhs)
 
         u = y0 + a51 * k1 + a52 * k2 + a53 * k3 + a54 * k4
-        du = terms.vf(t=t0 + c5 * dt, y=u, args=args)
+        du = terms.vf(t=t0 + c5 * dt, y=u, args=_args)
         rhs = du + dtd5 * dT + (dtC51 * k1 + dtC52 * k2 + dtC53 * k3 + dtC54 * k4)
-        k5 = jax.scipy.linalg.lu_solve((LU, piv), rhs)
+        k5 = lu_solve_batched(lu_and_piv, rhs)
 
         u = y0 + a61 * k1 + a62 * k2 + a63 * k3 + a64 * k4 + a65 * k5
-        du = terms.vf(t=t0 + dt, y=u, args=args)
+        du = terms.vf(t=t0 + dt, y=u, args=_args)
         rhs = du + (dtC61 * k1 + dtC62 * k2 + dtC63 * k3 + dtC64 * k4 + dtC65 * k5)
-        k6 = jax.scipy.linalg.lu_solve((LU, piv), rhs)
+        k6 = lu_solve_batched(lu_and_piv, rhs)
 
         u = u + k6
-        du = terms.vf(t=t0 + dt, y=u, args=args)
+        du = terms.vf(t=t0 + dt, y=u, args=_args)
         rhs = du + (
             dtC71 * k1 + dtC72 * k2 + dtC73 * k3 + dtC74 * k4 + dtC75 * k5 + dtC76 * k6
         )
-        k7 = jax.scipy.linalg.lu_solve((LU, piv), rhs)
+        k7 = lu_solve_batched(lu_and_piv, rhs)
 
         u = u + k7
-        du = terms.vf(t=t0 + dt, y=u, args=args)
+        du = terms.vf(t=t0 + dt, y=u, args=_args)
         rhs = du + (
             dtC81 * k1
             + dtC82 * k2
@@ -992,10 +1010,10 @@ class Rodas5Batched(AbstractAdaptiveSolver):
             + dtC86 * k6
             + dtC87 * k7
         )
-        k8 = jax.scipy.linalg.lu_solve((LU, piv), rhs)
+        k8 = lu_solve_batched(lu_and_piv, rhs)
 
         y1 = u + k8
-        du = terms.vf(t=t0 + dt, y=u, args=args)
+        du = terms.vf(t=t0 + dt, y=u, args=_args)
 
         dense_info = dict(y0=y0, y1=y1)  # for cubic spine inetrpolator:, k0=dy1, k1=du)
         return y1, k8, dense_info, None, RESULTS.successful
