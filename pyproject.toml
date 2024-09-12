@@ -14,26 +14,21 @@ dependencies = [
     "setuptools",
     "lineax",
 ]
-authors = [
-    { name = "Oliver Hahn", email = "oliver.hahn@univie.ac.at" },
-]
+authors = [{ name = "Oliver Hahn", email = "oliver.hahn@univie.ac.at" }]
 
 description = "..."
 readme = "README.md"
-license = {file = "LICENSE"}
+license = { file = "LICENSE" }
 requires-python = ">=3.8"
 classifiers = [
     "Development Status :: 4 - Beta",
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
     "Operating System :: POSIX :: Linux",
-    "Topic :: Scientific/Engineering :: Astronomy"
+    "Topic :: Scientific/Engineering :: Astronomy",
 ]
 [project.optional-dependencies]
-docs = [
-    "sphinx",
-    "nbsphinx",
-]
+docs = ["sphinx", "nbsphinx", "pytest"]
 
 [project.urls]
 Homepage = "https://github.com/ohahn/DISCO-EB"

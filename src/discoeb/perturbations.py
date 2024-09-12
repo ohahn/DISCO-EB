@@ -747,6 +747,8 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
     saveat = drx.SaveAt(ts=tau_out)
     sol = DEsolve_implicit( model=modelX, t0=tau_start, t1=tau_max, y0=y0, saveat=saveat, kmode=kmode )
 
+    jax.debug.print("sol stats: {}", sol.stats)
+
     # convert outputs
     yout = jax.vmap( lambda y : convert_to_output_variables( y=y, param=param, kmode=kmode, 
                                                    lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax) )( sol.ys )
@@ -831,7 +833,7 @@ def evolve_modes_batched( *, tau_max, tau_out, param, kmodes,
         # at the moment. Might save some memory after compilation?
 
         filters = jax.vmap(lambda kmode: jnp.array([1,kmode**2,1,1,1/kmode**2,1]))(kmodes_batch)
-        return drx.diffeqsolve(
+        sol =  drx.diffeqsolve(
             terms=modelX_term,
             solver=Rodas5Batched(),
             t0=t0,
@@ -848,7 +850,29 @@ def evolve_modes_batched( *, tau_max, tau_out, param, kmodes,
             # adjoint=drx.RecursiveCheckpointAdjoint(), # for backward differentiation
             adjoint=drx.DirectAdjoint(),  #for forward differentiation
             # adjoint=drx.BacksolveAdjoint(), # for backward differentiation
-        ).ys
+        )
+        
+        jax.debug.print("solution stats: {}", sol.stats)
+
+        return sol.ys
+        # return drx.diffeqsolve(
+        #     terms=modelX_term,
+        #     solver=Rodas5Batched(),
+        #     t0=t0,
+        #     t1=tau_max,
+        #     dt0=jnp.minimum(t0/4, 0.5*(tau_max-t0)),
+        #     y0=y0,
+        #     saveat=saveat,  
+        #     stepsize_controller = drx.PIDController(rtol=rtol, atol=atol, 
+        #                                             norm=lambda t:rms_norm_filtered_batched(t, jnp.array([0,2,3,5,6,7]), filters), # what to do with this norm?
+        #                                             pcoeff=pcoeff, icoeff=icoeff, dcoeff=dcoeff, factormax=factormax, factormin=factormin),
+        #     # default controller has icoeff=1, pcoeff=0, dcoeff=0
+        #     max_steps=max_steps,
+        #     args=(F, kmodes_batch),
+        #     # adjoint=drx.RecursiveCheckpointAdjoint(), # for backward differentiation
+        #     adjoint=drx.DirectAdjoint(),  #for forward differentiation
+        #     # adjoint=drx.BacksolveAdjoint(), # for backward differentiation
+        # ).ys
 
 
     DEsolve_implicit_vmap = jax.vmap(DEsolve_implicit, (0,0,0))
@@ -965,6 +989,8 @@ def evolve_perturbations_batched( *, param, aexp_out, kmin : float, kmax : float
         relative tolerance for ODE solver
     atol : float
         absolute tolerance for ODE solver
+    batch_size: int
+        number of modes to batch together for ODE solver
 
     Returns
     -------
