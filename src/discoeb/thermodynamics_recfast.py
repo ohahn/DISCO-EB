@@ -249,7 +249,7 @@ def compute_thermo( *, param : dict ) -> tuple[drx.Solution, dict]:
     # saveat = drx.SaveAt( t0=True,t1=True, dense=True )
     # saveat = drx.SaveAt( t0=True,t1=True,ts=jnp.geomspace(t0*1.001,t1*0.999,1024))#, steps=True, dense=True )
     # saveat = drx.SaveAt( t0=False, t1=True, ts=jnp.linspace(t0,t1,1024,endpoint=False), steps=True, dense=True )
-    saveat = drx.SaveAt( t0=True, t1=True, steps=True )#, dense=True )
+    saveat = drx.SaveAt( t0=False, t1=True, ts=jnp.linspace(t0,t1,1024,endpoint=False), steps=True )#, dense=True )
 
     sol =drx.diffeqsolve(
         terms=model,
