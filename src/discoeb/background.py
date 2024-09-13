@@ -26,7 +26,7 @@ def dtauda_(a, grhom, grhog, grhor, Omegam, OmegaDE, w_DE_0, w_DE_a, Omegak, Nef
 # @partial(jax.jit, static_argnames=('thermo_module',))
 def evolve_background( *, param, thermo_module = 'RECFAST', rtol: float = 1e-5, atol: float = 1e-7, order: int = 5, class_thermo = None ):
     c2ok = 1.62581581e4 # K / eV
-    amin = 1e-8
+    amin = 1e-9
     amax = 1.01
     num_thermo   = 2048 # length of thermal history arrays
     num_neutrino = 512  # number of neutrino history arrays
