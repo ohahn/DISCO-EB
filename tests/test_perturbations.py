@@ -61,14 +61,13 @@ test_points = k_CLASS[relevant_indices]
 test_values = Pkbc_CLASS[relevant_indices]
 
 
-class TestAgainstCLASS:
+class TestEvolvePerturbations:
 
     @pytest.fixture(autouse=True)
-    def compute_bacground_param(self):
+    def compute_background_param(self):
         self.param = evolve_background(param=param, thermo_module='RECFAST')
 
-    @pytest.mark.skip()
-    def test_power_spectrum_small_k(self):
+    def test_power_spectrum_small_k_vs_CLASS(self):
         aexp_out = jnp.array([aexp]) 
       
         y, kmodes = evolve_perturbations( param=self.param, kmin=kmin, kmax=kmax_small, num_k=nmodes, aexp_out=aexp_out,
@@ -79,13 +78,13 @@ class TestAgainstCLASS:
         
         Pkbc = fac *(kmodes/k_p)**(n_s - 1) * kmodes**(-3) * y[:,iout,6]**2
         disco_eb_values = jnp.interp(test_points, kmodes, Pkbc)
-        relative_error = jnp.abs(disco_eb_values - test_values)/test_values
-        assert jnp.all(relative_error <= 0.01), "relative error exceeded 0.01"
-        assert jnp.all(relative_error <= 0.005), "relative error exceeded 0.005"
+        # relative_error = jnp.abs(disco_eb_values - test_values)/test_values
+        assert jnp.allclose(disco_eb_values, test_values, rtol=0.01), "relative error exceeded 0.01"
+        assert jnp.allclose(disco_eb_values, test_values, rtol=0.005), "relative error exceeded 0.005"
         
     
     @pytest.mark.parametrize("batch_size", [4, 8, 16, 32, 64])
-    def test_power_spectrum_small_k_batched(self, batch_size):
+    def test_power_spectrum_small_k_vs_CLASS_batched(self, batch_size):
         aexp_out = jnp.array([aexp]) 
 
         y, kmodes = evolve_perturbations_batched( param=self.param, kmin=kmin, kmax=kmax_small, num_k=nmodes, aexp_out=aexp_out,
@@ -96,8 +95,8 @@ class TestAgainstCLASS:
         
         Pkbc = fac *(kmodes/k_p)**(n_s - 1) * kmodes**(-3) * y[:,iout,6]**2
         disco_eb_values = jnp.interp(test_points, kmodes, Pkbc)
-        relative_error = jnp.abs(disco_eb_values - test_values)/test_values
-        jax.debug.print("relative_error {}", relative_error)
+        # relative_error = jnp.abs(disco_eb_values - test_values)/test_values
+        # jax.debug.print("relative_error {}", relative_error)
 
-        assert jnp.all(relative_error <= 0.01), "relative error exceeded 0.01"
-        assert jnp.all(relative_error <= 0.005), "relative error exceeded 0.005"
+        assert jnp.allclose(disco_eb_values, test_values, rtol=0.01), "relative error exceeded 0.01"
+        assert jnp.allclose(disco_eb_values, test_values, rtol=0.005), "relative error exceeded 0.005"

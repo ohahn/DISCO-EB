@@ -8,9 +8,6 @@ from typing import Tuple
 from .cosmo import dadtau
 from .util import softclip
 
-from .ode_integrators_stiff import GRKT4
-
-
 const_c2ok = 1.62581581e4 # K / eV
 const_c_Mpc_s = 9.71561189e-15 # Mpc/s
 
@@ -263,7 +260,7 @@ def compute_thermo( *, param : dict ) -> dict:
         y0=y0,
         saveat=saveat,  
         stepsize_controller = drx.PIDController(rtol=1e-8,atol=1e-10,pcoeff=0.2, icoeff=1 ),
-        max_steps=4096, #2048,
+        max_steps=2048,
         args=(param, ),
         # adjoint=drx.RecursiveCheckpointAdjoint(),
         adjoint=drx.DirectAdjoint(),
