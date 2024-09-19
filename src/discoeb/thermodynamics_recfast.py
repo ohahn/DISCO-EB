@@ -8,6 +8,10 @@ from typing import Tuple
 from .cosmo import dadtau
 from .util import softclip
 
+from .ode_integrators_stiff import GRKT4, Rodas5Transformed
+from diffrax import Kvaerno5
+
+
 const_c2ok = 1.62581581e4 # K / eV
 const_c_Mpc_s = 9.71561189e-15 # Mpc/s
 
@@ -241,35 +245,25 @@ def compute_thermo( *, param : dict ) -> dict:
 
     y0 = jnp.array( [ jnp.log(param['amin']), param['YHe']/(const_mHe_mH*(1.0-param['YHe'])), 1.0, param['Tcmb'] ] )
 
-    # jax.debug.print('t0 = {}, t1 = {}, y0 = {}, f0 = {}', t0, t1, y0, model_recfast(tau=t0,yin=y0,param=param))
-
-    
     param['fHe'] = param['YHe']/(const_mHe_mH*(1.0-param['YHe']))
 
-    # saveat = drx.SaveAt( dense=True )
-    # saveat = drx.SaveAt( t0=True,t1=True, dense=True )
-    saveat = drx.SaveAt( t0=True,t1=True,ts=jnp.geomspace(t0*1.001,t1*0.999,1024))#, steps=True, dense=True )
-    
+    saveat = drx.SaveAt( t0=False, t1=True, ts=jnp.linspace(0,jnp.log(1000),256,endpoint=False), steps=True, dense=True )
 
     sol =drx.diffeqsolve(
         terms=model,
-        solver=drx.Kvaerno5( ), #drx.NewtonNonlinearSolver(rtol=1e-3,atol=1e-3) ),
+        solver=Rodas5Transformed( ), 
         t0=t0,
         t1=t1,
-        dt0=t0*1e-2,
+        dt0=jnp.abs(t0*1e-2),
         y0=y0,
         saveat=saveat,  
-        stepsize_controller = drx.PIDController(rtol=1e-8,atol=1e-10,pcoeff=0.2, icoeff=1 ),
+        stepsize_controller = drx.PIDController(rtol=1e-8,atol=1e-10), 
         max_steps=2048,
         args=(param, ),
         # adjoint=drx.RecursiveCheckpointAdjoint(),
         adjoint=drx.DirectAdjoint(),
         # adjoint=drx.ImplicitAdjoint(),
     )
-
-    # jax.debug.print('sol = {}', sol)
-    # param['thermo_solution'] = sol
-
     return sol, param
 
 
@@ -278,53 +272,25 @@ def evaluate_thermo( *, param : dict, num_thermo = 2048 ) -> jax.Array:
 
     sol    = param['sol']
 
-    # # i = jnp.argsort( sol.ts )
-    # # tau   = sol.ts[i]
-    # # y    = sol.ys[i,:]
+    # convert unused output array entries to NaNs (which are ignored by the interpolation)
+    invalid = sol.ts == jnp.inf
+    logtau = jnp.where( invalid, jnp.nan, sol.ts )
+    y = jnp.zeros_like(sol.ys)
+    for i in range(4):
+      y = y.at[:,i].set(jnp.where( invalid, jnp.nan, sol.ys[:,i] ))
 
-    # tau00  = param['tau_of_a_spline'].evaluate(1e-5)
-    # tau    = jnp.geomspace( tau00, sol.t1, num_thermo )
-    # tau    = tau.at[0].set(sol.t0)
-    # y      = jax.vmap( sol.evaluate )( tau )
-    # dydtau = jax.vmap( lambda tau_, y_: model_recfast( tau=tau_, yin=y_, param=param ) )( tau, y )
+    # collect output 
+    tau       = jnp.exp(logtau)
+    dydtau    = jax.vmap( lambda logtau_, y_: model_recfast( logtau=logtau_, yin=y_, param=param, noiseless_dT=True ) )( logtau, y )
+    a         = jnp.exp(y[:,0])
 
-    # a      = jnp.exp(y[:,0])
-    # xeHeII = jax.vmap( lambda a_: Saha_HeII( a_, param) )( a )
-    # xeHeI  = y[:,1]
-    # xeHI   = y[:,2]
-    # xe     = xeHI + xeHeI + xeHeII
-    
-    # Tm     = y[:,3]/a
-
-    # # daTmdtau  = dydtau[:,3] 
-    # # daTmdloga = daTmdtau / dadtau(a=a, param=param) * a #Hubble( a=a, param=param) 
-    # # mu        = 1/(1 + (1/const_mHe_mH-1) * param['YHe'] + (1-param['YHe']) * xe)
-    # # cs2       = const_kB/ const_mH / const_c**2 / mu * Tm * (4 - daTmdloga / (Tm*a)) /3
-
-    # daTmdtau  = dydtau[:,3] 
-    # daTmda    = daTmdtau / dadtau(a=a, param=param) #Hubble( a=a, param=param) 
-    # mu        = 1/(1 + (1/const_mHe_mH-1) * param['YHe'] + (1-param['YHe']) * xe)
-    # cs2       = const_kB/ const_mH / const_c**2 / mu * Tm * (4 - daTmda / (Tm)) /3
-    # cs2       = cs2.at[0].set( const_kB/ const_mH / const_c**2 / mu[0] * Tm[0] * 4/3 )
-
-
-
-    tau = sol.ts
-    y   = sol.ys
-    dydtau = jax.vmap( lambda tau_, y_: model_recfast( tau=tau_, yin=y_, param=param ) )( tau, y )
-
-    a   = jnp.exp(sol.ys[:,0])
-    xeHeII = jax.vmap( lambda a_: Saha_HeII( a_, param) )( a )
-    xeHeI  = sol.ys[:,1]
-    xeHI   = sol.ys[:,2]
-    xe     = xeHI + xeHeI + xeHeII
-    Tm     = sol.ys[:,3]/a
-    # Tm     = sol.ys[:,3]
-    daTmdtau  = dydtau[:,3] 
-    # dTmdtau   = dydtau[:,3] 
-    # d(aT)/dta = T + a dT/da
-    daTmda    = daTmdtau / dadtau(a=a, param=param) #Hubble( a=a, param=param) 
-    # daTmda    = Tm + a * dTmdtau / dadtau(a=a, param=param) 
+    xeHeII    = jax.vmap( lambda a_: Saha_HeII( a_, param) )( a )
+    xeHeI     = y[:,1]
+    xeHI      = y[:,2]
+    xe        = xeHI + xeHeI + xeHeII
+    Tm        = y[:,3]/a
+    daTmdtau  = dydtau[:,3] / tau
+    daTmda    = daTmdtau / dadtau(a=a, param=param) 
     mu        = 1/(1 + (1/const_mHe_mH-1) * param['YHe'] + (1-param['YHe']) * xe)
 
     # mu        = 1/(1 - 0.75 * param['YHe'] + (1 - param['YHe']) * xe)
