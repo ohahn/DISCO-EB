@@ -617,7 +617,7 @@ class Rodas5(AbstractAdaptiveSolver):
         return terms.vf(t0, y0, args)
 
 
-# Efficient implementation with no matrix multiplication, as outlined in Hairer & Wanner
+# Efficient implementation with no matrix multiplication
 
 gamma = 0.19
 a21 = 2.0
@@ -921,17 +921,9 @@ class Rodas5Batched(AbstractAdaptiveSolver):
         dtd5 = dt * d5
         dtgamma = dt * gamma
 
-        # calculate and invert W
         I = jnp.eye(n)
 
 
-        # def f(_t, _y, _a):
-        #     return terms.vf(
-        #         _t, 
-        #         jnp.stack([_y] + [jnp.zeros_like(_y)] * (n - 1)), 
-        #         jnp.stack([_a] + [jnp.zeros_like(_a)] * (n - 1))
-        #         )[0]
-        
         dt_f = jax.jacfwd(f, 0)
         jac_f = jax.jacfwd(f, 1)
 
@@ -942,30 +934,20 @@ class Rodas5Batched(AbstractAdaptiveSolver):
             in_axes=(None, 0, 0),
         )
 
-        # dt_f_batched = jax.vmap(
-        #     lambda _t, _y, _a: jax.jacobian(lambda __t: f(__t, _y, _a))(_t),
-        #     in_axes=(None, 0, 0),
-        # )
-        # jac_f_batched = jax.vmap(
-        #     lambda _t, _y, _a: jax.jacobian(lambda __y: f(_t, __y, _a))(_y),
-        #     in_axes=(None, 0, 0),
-        # )
         lu_batched = jax.vmap(
             lambda a: jax.scipy.linalg.lu_factor(I / dtgamma - a))
 
 
         dT = dt_f_batched(t0, y0, _args)
         jac_blocks = jac_f_batched(t0, y0, _args)
-        # LU, piv = jax.lax.map(
-        #      lambda a: jax.scipy.linalg.lu_factor(I / dtgamma - a), jac_blocks)
-
+        
         lu_and_piv = lu_batched(jac_blocks)
 
         lu_solve_batched = jax.vmap(jax.scipy.linalg.lu_solve, (0, 0))
 
         dy1 = terms.vf(t=t0, y=y0, args=_args)
         rhs = dy1 + dtd1 * dT
-        k1 = lu_solve_batched(lu_and_piv, rhs) # jax.scipy.linalg.lu_solve((LU, piv), rhs)
+        k1 = lu_solve_batched(lu_and_piv, rhs) 
 
         u = y0 + a21 * k1
         du = terms.vf(t=t0 + c2 * dt, y=u, args=_args)
@@ -1015,7 +997,7 @@ class Rodas5Batched(AbstractAdaptiveSolver):
         y1 = u + k8
         du = terms.vf(t=t0 + dt, y=u, args=_args)
 
-        dense_info = dict(y0=y0, y1=y1)  # for cubic spine inetrpolator:, k0=dy1, k1=du)
+        dense_info = dict(y0=y0, y1=y1) 
         return y1, k8, dense_info, None, RESULTS.successful
 
     def func(

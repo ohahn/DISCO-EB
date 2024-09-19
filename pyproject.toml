@@ -28,7 +28,8 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Astronomy",
 ]
 [project.optional-dependencies]
-docs = ["sphinx", "nbsphinx", "pytest"]
+dev = ["pytest", "pytest-benchmark"]
+docs = ["sphinx", "nbsphinx"]
 
 [project.urls]
 Homepage = "https://github.com/ohahn/DISCO-EB"

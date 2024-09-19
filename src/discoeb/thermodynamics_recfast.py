@@ -115,12 +115,14 @@ def Saha_HeII( a, param ):
     return xe
 
 
-def model_recfast( *, tau : float, yin : jnp.array, param : dict ) -> jnp.array:
+
+def model_recfast( *, logtau : float, yin : jnp.ndarray, param : dict, noiseless_dT : bool = False ) -> jnp.ndarray:
   """
     Recombination model from RECFAST (Seager et al. 1999), minor changes from original implementation
   """
-  rescale = 1.0e-16 #1e-9  # arbitrary rescaling to avoid numerical problems
-
+  rescale = 1.0e-16
+  
+  tau  = jnp.exp(logtau)
   a    = jnp.exp(yin[0])
   xHep = yin[1]
   xp   = yin[2]
@@ -134,8 +136,10 @@ def model_recfast( *, tau : float, yin : jnp.array, param : dict ) -> jnp.array:
   Hz = dadtau( a=a, param=param ) / a**2  # is in units of 1/Mpc
 
   nHtot = NHnow( a, param['YHe'], param['H0'], param['Omegab'] ) * rescale
-  nH1  = jax.lax.cond( xp > 0.999, lambda x: 0.0, lambda x: (1-xp) * nHtot, None )
-  nHe1 = jax.lax.cond( xHep > 0.999*fHe, lambda x: 0.0, lambda x: (fHe - xHep) * nHtot, None )
+
+  ε = 1e-4
+  nH1  = jax.lax.cond( xp > 1-ε, lambda x: 0.0, lambda x: (1-xp) * nHtot, None )
+  nHe1 = jax.lax.cond( xHep > (1-ε)*fHe, lambda x: 0.0, lambda x: (fHe - xHep) * nHtot, None )
 
   #  Calculate the Saha and Boltzmann equilibrium relations
   SHe = SahaBoltzmann( gi=1, gc=2, E_ion=const_EionHe2s, T=TM )
@@ -149,7 +153,7 @@ def model_recfast( *, tau : float, yin : jnp.array, param : dict ) -> jnp.array:
   # will also have to be incorporated into the derivatives wrt TM
 
   fBHe2p2s = fBoltzmann( gj=3, gi=1, E=const_E2p2sHe, T=TM)
-
+  
   # H recombination coefficient alphaBH and
   # photoionization coefficient betaH. 
   a1 =4.309 / const_c_Mpc_s * (1e-13/rescale); a2 = -0.6166; a3 = 0.6703; a4 = 0.5300
@@ -164,7 +168,7 @@ def model_recfast( *, tau : float, yin : jnp.array, param : dict ) -> jnp.array:
   fudge_F = 1.125 # use fudged updated fudge factor from newer recfast 
   
   alphaH *= fudge_F
-  betaH = alphaH/SH
+  betaH = ((alphaH*rescale)/SH)/rescale  # rescale is used to prevent underflow in single precision
 
   # He case B recombination and photoionization coefficient 
   # No need to multiply a fudge factor.     
@@ -174,30 +178,32 @@ def model_recfast( *, tau : float, yin : jnp.array, param : dict ) -> jnp.array:
   alphaHe = jnp.sqrt(TM/T0)*(1+jnp.sqrt(TM/T0))**(1-a2) \
     * (1.0+jnp.sqrt(TM/T1))**(1+a2)
   alphaHe = a1 / alphaHe / 1.0e+06 
-  betaHe = alphaHe / SHe
+  betaHe = ((alphaHe*rescale) / SHe)/rescale # rescale is used to prevent underflow in single precision
   
   # Cosmological redshifting 
-  KHe = (1/rescale) * const_LyalphaHe**3 / (Hz * 8 * jnp.pi)  # use Peebles coeff. for He # TODO: change units of const_LyalphaHe
-  KH = (1/rescale) * const_LyalphaH**3 / (Hz * 8 * jnp.pi)    # use Peebles coeff. for H # TODO: change units of const_LyalphaH
+  rescale13 = rescale**(1/3)
+  KHe = (const_LyalphaHe/rescale13)**3 / (Hz * 8 * jnp.pi)  # use Peebles coeff. for He # TODO: change units of const_LyalphaHe
+  KH =  (const_LyalphaH/rescale13)**3 / (Hz * 8 * jnp.pi)   # use Peebles coeff. for H # TODO: change units of const_LyalphaH
 
   # Inhibition factors
   fCHe = (1 + KHe*const_Lam2s1sHe * nHe1 * fBHe2p2s) \
     / (1 + KHe * (const_Lam2s1sHe + betaHe) * nHe1 * fBHe2p2s)
   fCH = (1 + KH*const_Lam2s1sH * nH1) / (1 + KH * (const_Lam2s1sH + betaH) * nH1)
+
   
   # Finally calculate the rate equations.
   #   0 = a, 1 = He, 2 = H,  3 = TM
   dlogadtau = a * Hz
-  dxHepdtau = a * (-alphaHe*xe*xHep*nHtot + betaHe*(fHe-xHep)*fBHe)*fCHe
-#   dxHepdtau_Saha = a * (-alphaHe*xe*xHep*nHtot + betaHe*(fHe-xHep)*fBHe)
-  dxpdtau   = a * (-alphaH*xe*xp*nHtot + betaH*(1.0-xp)*fBH)*fCH
-#   dxpdtau_Saha   = a * (-alphaH*xe*xp*nHtot + betaH*(1.0-xp)*fBH)
+  arescale = rescale
 
-#   dxpdtau  = jax.lax.cond( xe > 0.99, lambda x: dxpdtau_Saha, lambda x: dxpdtau, None)
-#   dHepdtau = jax.lax.cond( xe > 0.99, lambda x: dxHepdtau_Saha, lambda x: dxHepdtau, None)
-
-#   dxHepdtau_Saha = softclip( dxHepdtau_Saha, -1e6, 1e6 )
-#   dxpdtau_Saha   = softclip( dxpdtau_Saha, -1e6, 1e6 )
+  ε = 1e-4
+  dxHepdtau = jax.lax.cond( jnp.fabs(xHep) > ε, 
+              lambda x: a  * (-alphaHe*xe*nHtot + betaHe*(fHe/xHep-1.0)*fBHe)*xHep*fCHe, 
+              lambda x: a  * (-(alphaHe*arescale)*xe*xHep*(nHtot/arescale) + (betaHe*arescale)*(fHe-xHep)*(fBHe/arescale))*fCHe, None )
+              
+  dxpdtau   = a * fCH  * jax.lax.cond( jnp.fabs(xp) > ε, 
+                                lambda x: (-alphaH*xe*nHtot + betaH*fBH*(1.0/xp-1.0))*xp,
+                                lambda x: (-(alphaH*arescale)*(nHtot/arescale)*xe + betaH*fBH*(xp-1.0))*xp, None )
   
   # limit compton term to avoid numerical problems
   # Comp = 8/3 * const_sigmaT * const_aRad / const_me / const_c * TR**4 
@@ -206,42 +212,31 @@ def model_recfast( *, tau : float, yin : jnp.array, param : dict ) -> jnp.array:
   # fHe = param['YHe'] / (const_mHe_mH*(1-param['YHe']))
   compton_term = Comp * xe/(1 + xe + fHe)
   daTdtau      = a**2 * (compton_term * (TR - TM) - Hz * TM )
-  # dTdtau = (compton_term * (TR - TM) )*a - 2 * TM * dadtau( a=a, param=param ) / a
 
-  dxpdtau = jax.lax.cond( a < 1e-5, lambda x: 0.0, lambda x: dxpdtau, None )
-  dxHepdtau = jax.lax.cond( a < 1e-5, lambda x: 0.0, lambda x: dxHepdtau, None )
+  # if called in noiseless mode, set the derivative to zero if the temperature is not evolving
+  # otherwise the right hand side of the ODE can be noisy on the solution as the system is very stiff
+  ε = 1e-5
+  daTdtau = jax.lax.cond( noiseless_dT & (jnp.abs(a*TR-a*TM)<ε), lambda x: 0.0, lambda x: daTdtau, None )
 
-  daTdtau = jax.lax.cond( a < 1e-5, lambda x: 0.0, lambda x: daTdtau, None )
-  # daTdtau = jax.lax.cond( a < 1e-6, lambda x: a**2 * compton_term * (TR - TM), lambda x: daTdtau, None )
-
-  fvec = jnp.zeros(4)
-  fvec = fvec.at[0].set( dlogadtau )
-  fvec = fvec.at[1].set( dxHepdtau )
-  fvec = fvec.at[2].set( dxpdtau )
-  fvec = fvec.at[3].set( daTdtau )
-
-  # limit xHep to 1e-7 to avoid numerical problems
-  # fvec = fvec.at[1].set( jax.lax.cond( jnp.abs(xHep) < 1e-6, lambda x: (1e-7-xHep)/tau, lambda x: fvec[1], None ) )
-
-#   jax.debug.print('tau = {}, y = {}, f = {}', tau, yin, fvec)
-  return fvec
+  dy = jnp.array([ dlogadtau, dxHepdtau, dxpdtau, daTdtau ]) * tau
+  return dy
 
 class VectorField(eqx.Module):
     model: eqx.Module
 
-    def __call__(self, loga, y, args):
-        return self.model(loga, y, args)   
+    def __call__(self, logtau, y, args):
+        return self.model(logtau, y, args)   
 
 # @partial(jax.jit, backend='cpu')
 # @jax.jit
-def compute_thermo( *, param : dict ) -> dict:
+def compute_thermo( *, param : dict ) -> tuple[drx.Solution, dict]:
 
     model = drx.ODETerm(VectorField(
-        lambda tau, y , params : model_recfast( tau=tau, yin=y, param=params[0])
+        lambda logtau, y , params : model_recfast( logtau=logtau, yin=y, param=params[0])
     ))
 
-    t0 = param['taumin'] 
-    t1 = param['taumax'] 
+    t0 = jnp.log(param['taumin'])
+    t1 = jnp.log(param['taumax'])
 
     y0 = jnp.array( [ jnp.log(param['amin']), param['YHe']/(const_mHe_mH*(1.0-param['YHe'])), 1.0, param['Tcmb'] ] )
 

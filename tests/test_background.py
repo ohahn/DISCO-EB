@@ -1,4 +1,6 @@
 import pytest
+
+import jax
 import jax.numpy as jnp
 
 
@@ -58,21 +60,22 @@ param['Neff']    = N_nu_rel
 param['Nmnu']    = N_nu_mass
 param['mnu']     = mnu
 
+background_recfast_jit = jax.jit(lambda param: evolve_background(param=param, thermo_module='RECFAST'))
 
 class TestEvolveBackground:
+    
+    @pytest.fixture(autouse=True)
+    def jit_functions(self):
+        _ = background_recfast_jit(param=param)
 
-
-    def test_evolve_background_recfast_vs_DISCOEB_baseline(self):
-        solution_param = evolve_background(param=param, thermo_module='RECFAST')
+    def test_evolve_background_recfast_vs_DISCOEB_baseline(self, benchmark):
+        solution_param = benchmark(background_recfast_jit, param=param)
 
 
         xe = solution_param['xe_of_tau_spline'].evaluate(solution_param['tau_of_a_spline'].evaluate(solution_param['a']))
         a =  solution_param['a']
 
-        test_values = jnp.interp(a, a_RECFAST, xe_RECFAST)
-        relative_error = jnp.abs(test_values - xe)/test_values
-
         assert a.shape == a_RECFAST.shape
         assert xe.shape == xe_RECFAST.shape
-        assert jnp.allclose(a, a_RECFAST, 0.01), "relative error exceeded 0.01"
-        assert jnp.allclose(xe, xe_RECFAST, 0.005), "relative error exceeded 0.005"
+        assert jnp.allclose(a, a_RECFAST, rtol=0.01), "relative error exceeded 0.01"
+        assert jnp.allclose(xe, xe_RECFAST, rtol=0.005), "relative error exceeded 0.005"
