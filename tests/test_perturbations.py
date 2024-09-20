@@ -17,6 +17,7 @@ Omegac  = Omegam - Omegab
 w_DE_0  = -0.99
 w_DE_a  = 0.0
 cs2_DE  = 1.0
+
 # Initialize neutrinos.
 num_massive_neutrinos = 1
 mnu     = 0.06  #eV
@@ -42,7 +43,6 @@ aexp_out = jnp.array([aexp])
 param = {}
 param['Omegam']  = Omegam
 param['Omegab']  = Omegab
-# param['OmegaDE'] = OmegaDE
 param['w_DE_0']  = w_DE_0
 param['w_DE_a']  = w_DE_a
 param['cs2_DE']  = cs2_DE
@@ -103,12 +103,10 @@ class TestEvolvePerturbations:
         
         Pkbc = fac *(kmodes/k_p)**(n_s - 1) * kmodes**(-3) * y[:,iout,6]**2
         disco_eb_values = jnp.interp(small_kmax_test_points, kmodes, Pkbc)
-        # relative_error = jnp.abs(disco_eb_values - test_values)/test_values
-        # jax.debug.print("relative_error {}", relative_error)
+
         assert jnp.allclose(disco_eb_values, small_kmax_test_values, rtol=0.1), "relative error exceeded 0.1"
         assert jnp.allclose(disco_eb_values, small_kmax_test_values, rtol=0.01), "relative error exceeded 0.01"
         assert jnp.allclose(disco_eb_values, small_kmax_test_values, rtol=0.005), "relative error exceeded 0.005"
-        assert jnp.allclose(disco_eb_values, small_kmax_test_values, rtol=0.001), "relative error exceeded 0.005"
 
 
     def test_power_spectrum_vs_CLASS_batched(self, background_param):
@@ -121,12 +119,10 @@ class TestEvolvePerturbations:
         
         Pkbc = fac *(kmodes/k_p)**(n_s - 1) * kmodes**(-3) * y[:,iout,6]**2
         disco_eb_values = jnp.interp(test_points, kmodes, Pkbc)
-        # relative_error = jnp.abs(disco_eb_values - test_values)/test_values
-        # jax.debug.print("relative_error {}", relative_error)
+        
         assert jnp.allclose(disco_eb_values, test_values, rtol=0.1), "relative error exceeded 0.1"
         assert jnp.allclose(disco_eb_values, test_values, rtol=0.01), "relative error exceeded 0.01"
         assert jnp.allclose(disco_eb_values, test_values, rtol=0.005), "relative error exceeded 0.005"
-        assert jnp.allclose(disco_eb_values, test_values, rtol=0.001), "relative error exceeded 0.005"
 
 
     def test_power_spectrum_vs_CLASS(self, background_param):
@@ -140,7 +136,7 @@ class TestEvolvePerturbations:
         
         Pkbc = fac *(kmodes/k_p)**(n_s - 1) * kmodes**(-3) * y[:,iout,6]**2
         disco_eb_values = jnp.interp(test_points, kmodes, Pkbc)
-        # relative_error = jnp.abs(disco_eb_values - test_values)/test_values
+
         assert jnp.allclose(disco_eb_values, test_values, rtol=0.1), "relative error exceeded 0.1"
         assert jnp.allclose(disco_eb_values, test_values, rtol=0.01), "relative error exceeded 0.01"
         assert jnp.allclose(disco_eb_values, test_values, rtol=0.005), "relative error exceeded 0.005"

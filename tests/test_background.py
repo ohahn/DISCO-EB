@@ -68,14 +68,12 @@ class TestEvolveBackground:
     def jit_functions(self):
         _ = background_recfast_jit(param=param)
 
-    def test_evolve_background_recfast_vs_DISCOEB_baseline(self, benchmark):
+    def test_evolve_background_recfast_vs_DISCOEB_v0_1_0_baseline(self, benchmark):
         solution_param = benchmark(background_recfast_jit, param=param)
 
 
-        xe = solution_param['xe_of_tau_spline'].evaluate(solution_param['tau_of_a_spline'].evaluate(solution_param['a']))
-        a =  solution_param['a']
+        xe = solution_param['xe_of_tau_spline'].evaluate(solution_param['tau_of_a_spline'].evaluate(a_RECFAST))
 
-        assert a.shape == a_RECFAST.shape
         assert xe.shape == xe_RECFAST.shape
-        assert jnp.allclose(a, a_RECFAST, rtol=0.01), "relative error exceeded 0.01"
+        assert jnp.allclose(xe, xe_RECFAST, rtol=0.01), "relative error exceeded 0.01"
         assert jnp.allclose(xe, xe_RECFAST, rtol=0.005), "relative error exceeded 0.005"

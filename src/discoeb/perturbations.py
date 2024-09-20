@@ -747,8 +747,6 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
     saveat = drx.SaveAt(ts=tau_out)
     sol = DEsolve_implicit( model=modelX, t0=tau_start, t1=tau_max, y0=y0, saveat=saveat, kmode=kmode )
 
-    # jax.debug.print("sol stats: {}", sol.stats)
-
     # convert outputs
     yout = jax.vmap( lambda y : convert_to_output_variables( y=y, param=param, kmode=kmode, 
                                                    lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax) )( sol.ys )
@@ -852,8 +850,6 @@ def evolve_modes_batched( *, tau_max, tau_out, param, kmodes,
             # adjoint=drx.BacksolveAdjoint(), # for backward differentiation
         )
         
-        # jax.debug.print("solution stats: {}", sol.stats)
-
         return sol.ys
       
 
