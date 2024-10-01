@@ -3,12 +3,9 @@ import pytest
 import jax
 import jax.numpy as jnp
 
-
 from discoeb.background import evolve_background
 
 from conftest import a_RECFAST, xe_RECFAST
-
-import matplotlib.pyplot as plt
 
 ## Cosmological Parameters
 Tcmb    = 2.7255
