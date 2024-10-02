@@ -49,6 +49,10 @@ Then run `pytest` to start the tests. This should be run on GPU platforms.
 
 Start with the sample notebook [nb_minimal_example.ipynb](https://github.com/ohahn/DISCO-EB/blob/master/notebooks/nb_minimal_example.ipynb) in the [notebooks subdirectory](https://github.com/ohahn/DISCO-EB/tree/master/notebooks). It explains how to compute a matter power spectrum and take a derivative w.r.t. a cosmological parameter.
 
+## Benchmarks 
+
+See [BENCHMARKS.md](BENCHMARKS.md) for benchmark results on different hardware.
+
 ## Contributing and Licensing
 
 See file CONTRIBUTING.md on how to contribute to the development. 
