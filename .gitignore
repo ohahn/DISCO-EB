@@ -2,3 +2,6 @@
 docs/_build
 *.egg-info/
 dist/
+build/
+
+*/__pycache__

@@ -11,6 +11,10 @@ import equinox as eqx
 from functools import partial
 import jax.flatten_util as fu
 
+from .ode_integrators_stiff import Rodas5, Rodas5Transformed, Rodas5Batched
+from diffrax import Kvaerno5
+
+
 
 # @partial( jax.jit, static_argnames=('nqmax0',) )
 def nu_perturb( a : float, amnu: float, psi0: jax.Array, psi1 : jax.Array, psi2 : jax.Array, nqmax : int ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
@@ -44,7 +48,7 @@ def nu_perturb( a : float, amnu: float, psi0: jax.Array, psi1 : jax.Array, psi2 
     return drhonu, dpnu, fnu, shearnu
 
 
-@partial(jax.jit, static_argnames=('lmaxg', 'lmaxgp', 'lmaxr', 'lmaxnu', 'nqmax'))
+# @partial(jax.jit, static_argnames=('lmaxg', 'lmaxgp', 'lmaxr', 'lmaxnu', 'nqmax'))
 def model_synchronous(*, tau, y, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, nqmax ):     
     """Solve the synchronous gauge perturbation equations for a single mode.
 
@@ -485,7 +489,7 @@ def convert_to_output_variables(*, y, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu
     return yout
 
 
-def adiabatic_ics_one_mode( *, tau: float, param, kmode, nvar, lmaxg, lmaxgp, lmaxr, lmaxnu, nqmax ):
+def adiabatic_ics_one_mode( *, tau: float|Array, param, kmode, nvar, lmaxg, lmaxgp, lmaxr, lmaxnu, nqmax ):
     """Initial conditions for adiabatic perturbations"""
     Omegac = param['Omegam'] - param['Omegab']
 
@@ -659,9 +663,19 @@ class VectorField(eqx.Module):
 
     def __call__(self, t, y, args):
         return self.model(t, y, args)
-    
 
-def rms_norm_filtered(x: PyTree, filter_indices: jnp.array, weights: jnp.array) -> Scalar:
+def rms_norm_filtered_batched(x: PyTree, filter_indices: jnp.ndarray, weights: list[jnp.ndarray]) -> Scalar:
+    
+    xs_weighted = jax.vmap(lambda _x, _w: _x[filter_indices] * _w, (0, 0))(x, jnp.array(weights))
+    x_, _ = fu.ravel_pytree(xs_weighted)
+    return _rms_norm(x_)
+
+    # norms = jax.vmap(_rms_norm)(xs_weighted)
+
+    # return jnp.max(norms)
+
+
+def rms_norm_filtered(x: PyTree, filter_indices: jnp.ndarray, weights: jnp.ndarray) -> Scalar:
     x, _ = fu.ravel_pytree(x)
     if x.size == 0:
         return 0
@@ -687,9 +701,9 @@ def _rms_norm_jvp(x, tx):
     return out, t_out
     
 
-@partial(jax.jit, static_argnames=('lmaxg', 'lmaxgp', 'lmaxr', 'lmaxnu', 'nqmax','max_steps'))
+# @partial(jax.jit, static_argnames=('lmaxg', 'lmaxgp', 'lmaxr', 'lmaxnu', 'nqmax','max_steps'))
 def evolve_one_mode( *, tau_max, tau_out, param, kmode, 
-                        lmaxg : int, lmaxgp : int, lmaxr : int, lmaxnu : int, \
+                        lmaxg : int, lmaxgp : int, lmaxr : int, lmaxnu : int,
                         nqmax : int, rtol: float, atol: float,
                         pcoeff : float, icoeff : float, dcoeff : float, factormax : float, factormin : float, max_steps : int  ):
 
@@ -713,7 +727,7 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
     def DEsolve_implicit( *, model, t0, t1, y0, saveat, kmode ):
         return drx.diffeqsolve(
             terms=model,
-            solver=drx.Kvaerno5(),
+            solver=Rodas5Transformed(),
             t0=t0,
             t1=t1,
             dt0=jnp.minimum(t0/4, 0.5*(t1-t0)),
@@ -740,19 +754,135 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
     return yout
 
 
+#### NEW CODE FOR BATCHED CALCULATION ####
 
-def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k : int, \
-                         lmaxg : int = 11, lmaxgp : int = 11, lmaxr : int = 11, lmaxnu : int = 8, \
+def determine_start_times_per_batch(tau_out, param, kmodes, batch_size):
+    n_total = len(kmodes)
+
+    # starting time for one moda:
+    def starting_time_one_mode(p, k):
+        tau_start = determine_starting_time( param=p, k=k )
+        tau_start = 0.99 * jnp.minimum( jnp.min(tau_out), tau_start )
+
+        return tau_start
+    
+     # ... determine starting times for each mode
+    tau_start_all_modes = jax.vmap(starting_time_one_mode, (None, 0))( param, kmodes)
+
+    # arange the starting times into batches
+    tau_start_batches = jnp.array(jnp.split(tau_start_all_modes, n_total // batch_size))
+
+    # finally pick the same starting time for each batch
+    return jax.vmap(lambda a: jnp.min(a))(tau_start_batches)
+
+def calculate_ics(tau_start_batched, kmode_batches, param, nvar, lmaxg, lmaxgp, lmaxr, lmaxnu, nqmax):
+    
+    def calculate_ic_one_mode(tau_start, kmode):
+        return adiabatic_ics_one_mode( tau=tau_start, param=param, kmode=kmode, nvar=nvar, 
+                       lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax )
+
+    calc_ics_one_batch = jax.vmap(calculate_ic_one_mode, (None, 0))
+     
+    calc_ics_all_batches = jax.vmap(calc_ics_one_batch, (0, 0))
+
+    # assert False, str((jnp.array(tau_start_batched).shape, jnp.array(kmode_batches).shape)) == ((32,), (32, 16))
+
+    return calc_ics_all_batches(jnp.array(tau_start_batched), jnp.array(kmode_batches))
+
+# @partial(jax.jit, static_argnames=('lmaxg', 'lmaxgp', 'lmaxr', 'lmaxnu', 'nqmax','max_steps'))
+def evolve_modes_batched( *, tau_max, tau_out, param, kmodes, 
+                        lmaxg : int, lmaxgp : int, lmaxr : int, lmaxnu : int,
+                        nqmax : int, rtol: float, atol: float,
+                        pcoeff : float, icoeff : float, dcoeff : float, 
+                        factormax : float, factormin : float, max_steps : int  , 
+                        batch_size: int):
+
+    n_total = len(kmodes)
+    n_batches = n_total // batch_size
+
+    kmode_batches = jnp.array(jnp.split(kmodes, n_batches))
+
+    def F(tau, y, kmode):
+        return model_synchronous( tau=tau, y=y, param=param, kmode=kmode,  
+                                                   lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax)
+
+    # Why this wrapping in a VectorField a.k.a an equinox module? do we ever use the pytree structure of the module?
+    VF_ = VectorField( F )
+
+    modelX_ = jax.vmap(VF_, (None, 0, 0))
+    modelX_term = drx.ODETerm( modelX_ )
+    
+    # ... determine the number of active variables (i.e. the number of equations), absent any optimizations
+    nvar   = 7 + (lmaxg + 1) + (lmaxgp + 1) + (lmaxr + 1) + nqmax * (lmaxnu + 1) + 2
+
+    # ... determine the starting times for each batch
+    tau_start_batched = determine_start_times_per_batch(tau_out, param, kmodes, batch_size)
+
+    # ... set adiabatic ICs for each kmode an batch together
+    y0_batches = calculate_ics(tau_start_batched, kmode_batches, param, nvar, lmaxg, lmaxgp, lmaxr, lmaxnu, nqmax)
+
+    # solve before neutrinos become fluid
+    saveat = drx.SaveAt(ts=tau_out)
+
+    # create solver wrapper
+    def DEsolve_implicit(t0, y0, kmodes_batch):
+
+        # This function now only returns the solution.ys and nothing else, since the other info is not used
+        # at the moment. Might save some memory after compilation?
+
+        filters = jax.vmap(lambda kmode: jnp.array([1,kmode**2,1,1,1/kmode**2,1]))(kmodes_batch)
+        sol =  drx.diffeqsolve(
+            terms=modelX_term,
+            solver=Rodas5Batched(),
+            t0=t0,
+            t1=tau_max,
+            dt0=jnp.minimum(t0/4, 0.5*(tau_max-t0)),
+            y0=y0,
+            saveat=saveat,  
+            stepsize_controller = drx.PIDController(rtol=rtol, atol=atol, 
+                                                    norm=lambda t:rms_norm_filtered_batched(t, jnp.array([0,2,3,5,6,7]), filters), # what to do with this norm?
+                                                    pcoeff=pcoeff, icoeff=icoeff, dcoeff=dcoeff, factormax=factormax, factormin=factormin),
+            # default controller has icoeff=1, pcoeff=0, dcoeff=0
+            max_steps=max_steps,
+            args=(F, kmodes_batch),
+            # adjoint=drx.RecursiveCheckpointAdjoint(), # for backward differentiation
+            adjoint=drx.DirectAdjoint(),  #for forward differentiation
+            # adjoint=drx.BacksolveAdjoint(), # for backward differentiation
+        )
+        
+        return sol.ys
+      
+
+
+    DEsolve_implicit_vmap = jax.vmap(DEsolve_implicit, (0,0,0))
+
+    ys = DEsolve_implicit_vmap(tau_start_batched, y0_batches, kmode_batches)
+
+    n_batches, n_steps, _batch_size, _nvar = ys.shape
+
+    reordered_ys = jnp.reshape(ys, (n_total, n_steps, _nvar))
+
+    # convert outputs
+    def calculate_final_ys( kmode, ys): 
+        return jax.vmap( lambda y : convert_to_output_variables( y=y, param=param, kmode=kmode, 
+                                                   lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax) )( ys )
+    
+    return jax.vmap(calculate_final_ys, (0,0))(kmodes, reordered_ys)
+
+
+
+def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k : int,
+                         lmaxg : int = 11, lmaxgp : int = 11, lmaxr : int = 11, lmaxnu : int = 8,
                          nqmax : int = 3, rtol: float = 1e-4, atol: float = 1e-4,
-                         pcoeff : float = 0.25, icoeff : float = 0.80, dcoeff : float = 0.0, \
-                         factormax : float = 20.0, factormin : float = 0.3, max_steps : int = 2048 ):
+                         pcoeff : float = 0.25, icoeff : float = 0.80, dcoeff : float = 0.0,
+                         factormax : float = 20.0, factormin : float = 0.3, max_steps : int = 2048):
     """evolve cosmological perturbations in the synchronous gauge
 
     Parameters
     ----------
     param : dict
         dictionary of parameters and interpolated functions
-    aexp_out : array
+    aexp_out : jnp.ndarray
         array of scale factors at which to output
     kmin : float
         minimum wavenumber [in units 1/Mpc]
@@ -777,9 +907,9 @@ def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k 
 
     Returns
     -------
-    y : array
+    y : jnp.ndarray
         array of shape (num_k, nout, nvar) containing the perturbations
-    k : array
+    k : jnp.ndarray
         array of shape (num_k) containing the wavenumbers [in units 1/Mpc]
     """
     kmodes = jnp.geomspace(kmin, kmax, num_k)
@@ -804,8 +934,71 @@ def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k 
     return y1, kmodes
 
 
-@partial(jax.jit, static_argnames=('N'))
-def get_xi_from_P( *, k : jnp.array, Pk : jnp.array, N : int, ell : int = 0 ):
+def evolve_perturbations_batched( *, param, aexp_out, kmin : float, kmax : float, num_k : int,
+                         lmaxg : int = 11, lmaxgp : int = 11, lmaxr : int = 11, lmaxnu : int = 8,
+                         nqmax : int = 3, rtol: float = 1e-4, atol: float = 1e-4,
+                         pcoeff : float = 0.25, icoeff : float = 0.80, dcoeff : float = 0.0,
+                         factormax : float = 20.0, factormin : float = 0.3, max_steps : int = 2048 , 
+                         batch_size: int = 16):
+    """evolve cosmological perturbations in the synchronous gauge
+
+    Parameters
+    ----------
+    param : dict
+        dictionary of parameters and interpolated functions
+    aexp_out : jnp.ndarray
+        array of scale factors at which to output
+    kmin : float
+        minimum wavenumber [in units 1/Mpc]
+    kmax : float
+        maximum wavenumber [in units 1/Mpc]
+    num_k : int
+        number of wavenumbers
+    lmaxg : int
+        maximum multipole for photon temperature
+    lmaxgp : int
+        maximum multipole for photon polarization
+    lmaxr : int
+        maximum multipole for massless neutrinos
+    lmaxnu : int
+        maximum multipole for massive neutrinos
+    nqmax : int
+        number of momentum bins for massive neutrinos
+    rtol : float
+        relative tolerance for ODE solver
+    atol : float
+        absolute tolerance for ODE solver
+    batch_size: int
+        number of modes to batch together for ODE solver
+
+    Returns
+    -------
+    y : jnp.ndarray
+        array of shape (num_k, nout, nvar) containing the perturbations
+    k : jnp.ndarray
+        array of shape (num_k) containing the wavenumbers [in units 1/Mpc]
+    """
+    kmodes = jnp.geomspace(kmin, kmax, num_k)
+    
+
+    # determine output times from aexp_out
+    tau_out = jax.vmap( lambda a: param['tau_of_a_spline'].evaluate(a) )(aexp_out)
+    tau_max = jnp.max(tau_out)
+    nout = aexp_out.shape[0]
+    param['nout'] = nout
+
+    # do all calculations batched in here
+    y1 = evolve_modes_batched(tau_max=tau_max, tau_out=tau_out, param=param, kmodes=kmodes, lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, 
+                                    lmaxnu=lmaxnu, nqmax=nqmax, rtol=rtol, atol=atol,
+                                    pcoeff=pcoeff, icoeff=icoeff, dcoeff=dcoeff, 
+                                    factormax=factormax, factormin=factormin, max_steps=max_steps,
+                                    batch_size=batch_size )
+    
+    return y1, kmodes
+
+
+# @partial(jax.jit, static_argnames=('N'))
+def get_xi_from_P( *, k : jnp.ndarray, Pk : jnp.ndarray, N : int, ell : int = 0 ):
     """ get the correlation function from the power spectrum  using FFTlog, cf.
         J. D. Talman (1978). JCP, 29:35-48		
         A. J. S. Hamilton (2000).  MNRAS, 312:257-284
@@ -902,7 +1095,7 @@ def get_power_smoothed( *, k : jax.Array, y : jax.Array, dlogk : float, idx : in
 
     return Pms
 
-def power_Kaiser( *, y : jax.Array, kmodes : jax.Array, bias : float, mu_sampling : bool = True, smooth_dlogk : float = None, nmu : int, param : dict) -> tuple[jax.Array]:
+def power_Kaiser( *, y : jax.Array, kmodes : jax.Array, bias : float, mu_sampling : bool = True, smooth_dlogk : float = None, nmu : int, param : dict) -> tuple[jax.Array, jax.Array]:
     """ compute the anisotropic power spectrum using the Kaiser formula
     
     Args:
@@ -918,7 +1111,6 @@ def power_Kaiser( *, y : jax.Array, kmodes : jax.Array, bias : float, mu_samplin
     Returns:
         P(k,mu) (array_like) : anisotropic spectrum
         mu (array_like)      : mu bins
-        theta (array_like)   : theta bins, mu = cos(theta)
     """
     
     if mu_sampling:
@@ -943,7 +1135,7 @@ def power_Kaiser( *, y : jax.Array, kmodes : jax.Array, bias : float, mu_samplin
 
 
 
-def power_multipoles( *, y : jnp.array, kmodes : jnp.array, b : float, param ) -> tuple[jax.Array]:
+def power_multipoles( *, y : jnp.ndarray, kmodes : jnp.ndarray, b : float, param ) -> tuple[jax.Array]:
     """ compute the power spectrum multipoles (l=0,2,4)
 
     Args:
