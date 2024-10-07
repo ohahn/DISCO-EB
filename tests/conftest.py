@@ -15,3 +15,6 @@ Pkbc_CLASS = jnp.array(CLASS_DATA["Pkbc"])
 
 a_RECFAST = jnp.array(RECFAST_DISCO_EB_DATA["a"])
 xe_RECFAST = jnp.array(RECFAST_DISCO_EB_DATA["xe"])
+
+def pytest_sessionstart(session):
+    jax.print_environment_info()
