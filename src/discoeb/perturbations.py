@@ -157,20 +157,20 @@ def model_synchronous(*, tau, y, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, nqm
     rho_plus_p_theta_Q = (1+w_Q) * rho_Q * param['grhom'] * param['OmegaDE'] * thetaq * a**2
     
     # ... homogeneous background
-    grho = (
-        param['grhom'] * param['Omegam'] / a
-        + (param['grhog'] + param['grhor'] * (param['Neff'] + param['Nmnu'] * rhonu)) / a**2
-        + param['grhom'] * param['OmegaDE'] * rho_Q * a**2
-        + param['grhom'] * param['Omegak']
-    )
+    # grho = (
+    #     param['grhom'] * param['Omegam'] / a
+    #     + (param['grhog'] + param['grhor'] * (param['Neff'] + param['Nmnu'] * rhonu)) / a**2
+    #     + param['grhom'] * param['OmegaDE'] * rho_Q * a**2
+    #     + param['grhom'] * param['Omegak']
+    # )
 
     # gpres = (
     #     (param['grhog'] + param['grhor'] * param['Neff']) / 3.0 + param['grhor'] * param['Nmnu'] * pnu
     # ) / a**2 + w_Q * param['grhom'] * param['OmegaDE'] * rho_Q * a**2
 
     # ... compute expansion rate
-
-    aprimeoa = jnp.sqrt(grho / 3.0)                # Friedmann I
+    aprimeoa = get_aprimeoa( param=param, aexp=a )
+    # aprimeoa = jnp.sqrt(grho / 3.0)                # Friedmann I
     # aprimeprimeoa = 0.5 * (aprimeoa**2 - gpres)    # Friedmann II
 
     # quintessence EOS time derivatives

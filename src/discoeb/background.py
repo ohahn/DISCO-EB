@@ -1,29 +1,15 @@
-from .thermodynamics_recfast import compute_thermo as compute_thermo_recfast, evaluate_thermo as evaluate_thermo_recfast
-from .thermodynamics_mb95 import compute_thermo as compute_thermo_mb95
-from .cosmo import nu_background
 import jax
 import jax.numpy as jnp
 import diffrax as drx
-import equinox as eqx
 from jax_cosmo.scipy.integrate import romb
-from functools import partial
+
+from .thermodynamics_recfast import compute_thermo as compute_thermo_recfast, evaluate_thermo as evaluate_thermo_recfast
+from .thermodynamics_mb95 import compute_thermo as compute_thermo_mb95
+
+from .spline_interpolation import spline_interpolation
+from .cosmo import nu_background, dtauda_, get_aprimeoa
 
 
-def a_of_tau( tau_ : float | jax.Array, param : dict ) -> float | jax.Array:
-    a, _, _, _ = param['sol'].evaluate(tau_)
-    return a
-
-def dtauda_(a, grhom, grhog, grhor, Omegam, OmegaDE, w_DE_0, w_DE_a, Omegak, Neff, Nmnu, logrhonu_spline):
-    """Derivative of conformal time with respect to scale factor"""
-    rho_DE = a**(-3*(1+w_DE_0+w_DE_a)) * jnp.exp(3*(a-1)*w_DE_a)
-    grho2 = grhom * Omegam * a \
-        + (grhog + grhor*(Neff+Nmnu*jnp.exp(logrhonu_spline.evaluate(jnp.log(a))))) \
-        + grhom * OmegaDE * rho_DE * a**4 \
-        + grhom * Omegak * a**2
-    return jnp.sqrt(3.0 / grho2)
-
-
-# @partial(jax.jit, static_argnames=('thermo_module',))
 def evolve_background( *, param, thermo_module = 'RECFAST', rtol: float = 1e-5, atol: float = 1e-7, order: int = 5, class_thermo = None ):
     c2ok = 1.62581581e4 # K / eV
     amin = 1e-9
@@ -49,7 +35,6 @@ def evolve_background( *, param, thermo_module = 'RECFAST', rtol: float = 1e-5, 
         amin = jnp.min( class_thermo['scale factor a'] )
         amax = jnp.max( class_thermo['scale factor a'] )
 
-    
     # Compute the scale factor linearly spaced in log(a)
     a = jnp.geomspace(amin*0.9, amax*1.1, num_neutrino)
     loga = jnp.log(a)
@@ -58,14 +43,9 @@ def evolve_background( *, param, thermo_module = 'RECFAST', rtol: float = 1e-5, 
     # Compute the neutrino density and pressure
     rhonu_, pnu_, ppnu_ = jax.vmap( lambda a_ : nu_background( a_, param['amnu'] ), in_axes=0 )( a )
 
-    rhonu_coeff = drx.backward_hermite_coefficients(ts=loga, ys=jnp.log(rhonu_))
-    pnu_coeff = drx.backward_hermite_coefficients(ts=loga, ys=jnp.log(pnu_))
-    ppnu_coeff = drx.backward_hermite_coefficients(ts=loga, ys=jnp.log(ppnu_))
-    rhonu_spline = drx.CubicInterpolation( ts=loga, coeffs=rhonu_coeff )
-    
-    param['logrhonu_of_loga_spline']     = rhonu_spline
-    param['logpnu_of_loga_spline']       = drx.CubicInterpolation( ts=loga, coeffs=pnu_coeff )
-    param['logppseudonu_of_loga_spline'] = drx.CubicInterpolation( ts=loga, coeffs=ppnu_coeff )
+    param['logrhonu_of_loga_spline']     = spline_interpolation( loga, jnp.log(rhonu_) )
+    param['logpnu_of_loga_spline']       = spline_interpolation( loga, jnp.log(pnu_) )
+    param['logppseudonu_of_loga_spline'] = spline_interpolation( loga, jnp.log(ppnu_) )
 
     # compute the energy density today due to massive neutrinos
     rhonu = jnp.exp(param['logrhonu_of_loga_spline'].evaluate(0.0))
@@ -79,18 +59,20 @@ def evolve_background( *, param, thermo_module = 'RECFAST', rtol: float = 1e-5, 
 
     # Compute the conformal time interval
     param['taumin'] = amin / param['adotrad']
-    param['taumax'] = param['taumin'] + romb( lambda a_: dtauda_(a_,param['grhom'], param['grhog'], param['grhor'], 
-                                                                 param['Omegam'], param['OmegaDE'], param['w_DE_0'], param['w_DE_a'],
-                                                                 param['Omegak'], param['Neff'], param['Nmnu'], 
-                                                                 param['logrhonu_of_loga_spline']), amin, amax )
-    
+    param['taumax'] = (param['taumin'] + 
+        romb( lambda a_: dtauda_(a_,param['grhom'], param['grhog'], param['grhor'], 
+                        param['Omegam'], param['OmegaDE'], param['w_DE_0'], param['w_DE_a'],
+                        param['Omegak'], param['Neff'], param['Nmnu'], 
+                        param['logrhonu_of_loga_spline']), amin, amax )
+    )
+
     if thermo_module == 'RECFAST':
         # Compute the thermal history
         sol, param = compute_thermo_recfast( param=param )
 
         param['sol'] = sol
 
-        tau, aexp, cs2, Tm, mu, xe, xeHI, xeHeI, xeHeII = evaluate_thermo_recfast( param=param, num_thermo=num_thermo )
+        tau, aexp, cs2, Tm, mu, xe, xeHI, xeHeI, xeHeII, xeprime_recfast = evaluate_thermo_recfast( param=param, num_thermo=num_thermo )
 
         param['aexp'] = aexp
         param['tau'] = tau
@@ -99,28 +81,13 @@ def evolve_background( *, param, thermo_module = 'RECFAST', rtol: float = 1e-5, 
         param['xeHeI'] = xeHeI
         param['xeHeII'] = xeHeII
         param['cs2'] = cs2
+        param['Tm'] = Tm
 
-        # # param['a_of_tau_spline'] = lambda tau : jnp.exp(sol.evaluate( tau )[0])
-        
-        # # param['a_of_tau_spline']     = lambda tau : jnp.exp(param['sol'].evaluate( tau )[0])
-
-        # tau  = jnp.geomspace(param['taumin'], param['taumax'], num_thermo)
-        # aexp = jax.vmap( lambda tau_: jnp.exp((param['sol'].evaluate(tau_))[0]), in_axes=0 )( tau )
-
-        param['tau_coeff'] = drx.backward_hermite_coefficients(ts=aexp, ys=tau)
-        param['tau_of_a_spline'] = drx.CubicInterpolation( ts=aexp, coeffs=param['tau_coeff'] )
-
-        param['a_coeff'] = drx.backward_hermite_coefficients(ts=tau, ys=aexp)
-        param['a_of_tau_spline'] = drx.CubicInterpolation( ts=tau, coeffs=param['a_coeff'] )
-
-        param['xe_coeff']  = drx.backward_hermite_coefficients(ts=tau, ys=xe)
-        param['xe_of_tau_spline']    = drx.CubicInterpolation( ts=tau, coeffs=param['xe_coeff'] )
-
-        param['cs2a_coeff'] = drx.backward_hermite_coefficients(ts=tau, ys=(aexp*cs2))
-        param['cs2a_of_tau_spline']   = drx.CubicInterpolation( ts=tau, coeffs=param['cs2a_coeff'] )
-
-        param['tba_coeff']  = drx.backward_hermite_coefficients(ts=tau, ys=(aexp*Tm))
-        param['tempba_of_tau_spline'] = drx.CubicInterpolation( ts=tau, coeffs=param['tba_coeff'] )
+        param['tau_of_a_spline']      = spline_interpolation( aexp, tau )
+        param['a_of_tau_spline']      = spline_interpolation( tau, aexp )
+        param['xe_of_tau_spline']     = spline_interpolation( tau, xe )
+        param['cs2a_of_tau_spline']   = spline_interpolation( tau, aexp*cs2 )
+        param['tempba_of_tau_spline'] = spline_interpolation( tau, aexp*Tm )
 
     elif thermo_module == 'MB95':
 
@@ -131,55 +98,74 @@ def evolve_background( *, param, thermo_module = 'RECFAST', rtol: float = 1e-5, 
         xeHI = th['xHII']
         xeHeI = th['xHeII']
         xeHeII = th['xHeIII']
-        a = th['a']
+        aexp = th['a']
         tau = th['tau']
         cs2 = th['cs2']
         Tm = th['tb']
-
-        # tau, a, cs2, Tm, mu, xe, xeHI, xeHeI, xeHeII = compute_thermo_mb95( param=param, num_thermo=num_thermo )
 
         param['xe'] = xe
         param['xeHI'] = xeHI
         param['xeHeI'] = xeHeI
         param['xeHeII'] = xeHeII
-
-        param['xe_coeff']  = drx.backward_hermite_coefficients(ts=tau, ys=xe)
-        param['xe_of_tau_spline']    = drx.CubicInterpolation( ts=tau, coeffs=param['xe_coeff'] )
-
-        param['cs2a_coeff'] = drx.backward_hermite_coefficients(ts=tau, ys=(a*cs2))
-        param['cs2a_of_tau_spline']   = drx.CubicInterpolation( ts=tau, coeffs=param['cs2a_coeff'] )
-
-        param['tba_coeff']  = drx.backward_hermite_coefficients(ts=tau, ys=(a*Tm))
-        param['tempba_of_tau_spline'] = drx.CubicInterpolation( ts=tau, coeffs=param['tba_coeff'] )
-
-        param['a'] = a
+        param['aexp'] = aexp
         param['tau'] = tau
 
-        param['tau_coeff'] = drx.backward_hermite_coefficients(ts=a, ys=tau)
-        param['tau_of_a_spline'] = drx.CubicInterpolation( ts=a, coeffs=param['tau_coeff'] )
-
-        param['a_coeff'] = drx.backward_hermite_coefficients(ts=tau, ys=a)
-        param['a_of_tau_spline'] = drx.CubicInterpolation( ts=tau, coeffs=param['a_coeff'] )
+        param['xe_of_tau_spline']     = spline_interpolation( tau, xe )
+        param['cs2a_of_tau_spline']   = spline_interpolation( tau, aexp*cs2 )
+        param['tempba_of_tau_spline'] = spline_interpolation( tau, aexp*Tm )
+        param['tau_of_a_spline'] = spline_interpolation( aexp, tau )
+        param['a_of_tau_spline'] = spline_interpolation( tau, aexp )
 
     elif thermo_module == 'CLASS':
         # use input CLASS thermodynamics
-        # interpolating splines for the thermal history
-        param['cs2_coeff'] = drx.backward_hermite_coefficients(ts=class_thermo['conf. time [Mpc]'][::-1], ys=class_thermo['c_b^2'][::-1])
-        param['tb_coeff']  = drx.backward_hermite_coefficients(ts=class_thermo['conf. time [Mpc]'][::-1], ys=class_thermo['Tb [K]'][::-1])
-        param['xe_coeff']  = drx.backward_hermite_coefficients(ts=class_thermo['conf. time [Mpc]'][::-1], ys=class_thermo['x_e'][::-1])
-        param['a_coeff']   = drx.backward_hermite_coefficients(ts=class_thermo['conf. time [Mpc]'][::-1], ys=class_thermo['scale factor a'][::-1])
-        param['tau_coeff'] = drx.backward_hermite_coefficients(ts=class_thermo['scale factor a'][::-1],   ys=class_thermo['conf. time [Mpc]'][::-1])
-        
-        param['cs2_of_tau_spline']   = drx.CubicInterpolation( ts=class_thermo['conf. time [Mpc]'][::-1], coeffs=param['cs2_coeff'] )
-        param['tempb_of_tau_spline'] = drx.CubicInterpolation( ts=class_thermo['conf. time [Mpc]'][::-1], coeffs=param['tb_coeff'] )
-        param['xe_of_tau_spline']    = drx.CubicInterpolation( ts=class_thermo['conf. time [Mpc]'][::-1], coeffs=param['xe_coeff'] )
-        param['a_of_tau_spline']     = drx.CubicInterpolation( ts=class_thermo['conf. time [Mpc]'][::-1], coeffs=param['a_coeff'] )
-        param['tau_of_a_spline']     = drx.CubicInterpolation( ts=class_thermo['scale factor a'][::-1],   coeffs=param['tau_coeff'] )
+        # interpolating splines for the thermal history        
+        param['cs2_of_tau_spline']   = spline_interpolation( class_thermo['conf. time [Mpc]'][::-1], class_thermo['c_b^2'][::-1] )
+        param['tempb_of_tau_spline'] = spline_interpolation( class_thermo['conf. time [Mpc]'][::-1], class_thermo['Tb [K]'][::-1] )
+        param['xe_of_tau_spline']    = spline_interpolation( class_thermo['conf. time [Mpc]'][::-1], class_thermo['x_e'][::-1] )
+        param['a_of_tau_spline']     = spline_interpolation( class_thermo['conf. time [Mpc]'][::-1], class_thermo['scale factor a'][::-1] )
+        param['tau_of_a_spline']     = spline_interpolation( class_thermo['scale factor a'][::-1],   class_thermo['conf. time [Mpc]'][::-1] )
 
-        param['a'] = class_thermo['scale factor a'][::-1]
+        param['aexp'] = class_thermo['scale factor a'][::-1]
         param['tau'] = class_thermo['conf. time [Mpc]'][::-1]
     
 
+
+    # compute optical depth and visibility functions
+    akthom = 2.3038921003709498e-9 * (1.0 - param['YHe']) * param['Omegab'] * param['H0']**2
+    # grho_v = jax.vmap( lambda a: grho( param, a ) )( a )(aexp)
+    # aprimeoa = jnp.sqrt( grho_v / 3.0 )
+    aprimeoa = get_aprimeoa( param=param, aexp=aexp )
+
+    xe        = param['xe_of_tau_spline'].evaluate( tau )
+    xeprime   = param['xe_of_tau_spline'].derivative( tau )
+    # xepprime  = param['xe_of_tau_spline'].derivative2( tau )
+    opac      = xe * akthom / aexp**2
+
+    opacspline = spline_interpolation( tau, opac, integrate_from_start=False)
+    opacprime  = opacspline.derivative( tau )
+    opacpprime = opacspline.derivative2( tau )
+    # opacprime = xeprime * akthom / aexp**2 - 2 * xe * akthom / aexp**2 * aprimeoa
+
+    optical_depth = opacspline.integral( tau )
+    optical_depth_today = opacspline.integral( param['tau_of_a_spline'].evaluate( 1.0 ) )
+    optical_depth -= optical_depth_today
+
+    # optical_depth = jnp.array([optical_depth[0], *optical_depth])
+    expmmu    = jnp.exp(-optical_depth)
+    vis       = opac * expmmu
+    dvis      = (opacprime + opac**2) * expmmu
+    ddvis     = (opacpprime + 3 * opac * opacprime + opac**3) * expmmu
+
+    param['optical_depth'] = optical_depth
+    param['opac'] = opac
+    param['gvis'] = vis
+    param['gvisprime'] = dvis
+    param['gvispprime'] = ddvis
+
+    if thermo_module == 'RECFAST':
+        param['xeprime_recf'] = xeprime_recfast
+
+    param['xeprime'] = xeprime
     
     return param 
         
