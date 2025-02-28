@@ -296,8 +296,9 @@ def solve_ionization( *, astart : float, aend : float, ystart : jnp.ndarray, rto
         max_steps=max_steps,
         args=(param,),
         # adjoint=drx.RecursiveCheckpointAdjoint(),
-        adjoint=drx.DirectAdjoint(),
+        adjoint=drx.ForwardMode(),
         # adjoint=drx.ImplicitAdjoint(),
+        throw=False,
     )
   dyda = ionization( aend, sol.ys[-1,:], (param,) )
   return jnp.append(sol.ys[-1,:], dyda)
@@ -355,10 +356,11 @@ def compute_thermal_history( *, a0 : float, a1 : float, N : int, rtol : float = 
 
   def loop_body(i, y_arr):
     astart = a[i]
+    zstart = 1.0/astart - 1.0
     aend   = a[i+1]
     zend   = 1.0/aend - 1.0
     dzda   = -1.0/aend**2
-    y_prev = jnp.where(i > 0, y_arr[:, i-1], jnp.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0]))
+    y_prev = jnp.where(i > 0, y_arr[:, i-1], jnp.array([1.0, 1.0, param['Tcmb']*(1.0 + zstart), 0.0, 0.0, -param['Tcmb']*(1.0 + zstart)]))
 
     cond1 = (zend > 3500.0)
     cond2 = jnp.logical_and(i > 0, y_prev[1] > 0.99)
