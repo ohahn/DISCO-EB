@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import diffrax as drx
 from jax_cosmo.scipy.integrate import romb
 
-from .thermodynamics_recfast import compute_thermo as compute_thermo_recfast, evaluate_thermo as evaluate_thermo_recfast
+from .thermodynamics_recfast import evaluate_thermo as evaluate_thermo_recfast
 from .thermodynamics_mb95 import compute_thermo as compute_thermo_mb95
 
 from .spline_interpolation import spline_interpolation
@@ -68,11 +68,7 @@ def evolve_background( *, param, thermo_module = 'RECFAST', rtol: float = 1e-5, 
 
     if thermo_module == 'RECFAST':
         # Compute the thermal history
-        sol, param = compute_thermo_recfast( param=param )
-
-        param['sol'] = sol
-
-        tau, aexp, cs2, Tm, mu, xe, xeHI, xeHeI, xeHeII, xeprime_recfast = evaluate_thermo_recfast( param=param, num_thermo=num_thermo )
+        param, tau, aexp, cs2, Tm, mu, xe, xeHI, xeHeI, xeHeII, xeprime_recfast = evaluate_thermo_recfast( param=param, num_thermo=num_thermo )
 
         param['aexp'] = aexp
         param['tau'] = tau
