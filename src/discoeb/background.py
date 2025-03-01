@@ -9,12 +9,8 @@ from .thermodynamics_mb95 import compute_thermo as compute_thermo_mb95
 from .spline_interpolation import spline_interpolation
 from .cosmo import nu_background, dtauda_, get_aprimeoa
 
-
-def evolve_background( *, param, thermo_module = 'RECFAST', rtol: float = 1e-5, atol: float = 1e-7, order: int = 5, class_thermo = None ):
+def setup_background_evolution( *, amin, amax, param ):
     c2ok = 1.62581581e4 # K / eV
-    amin = 1e-9
-    amax = 1.01
-    num_thermo   = 2048 # length of thermal history arrays
     num_neutrino = 512  # number of neutrino history arrays
     
     param['amin'] = amin
@@ -29,11 +25,6 @@ def evolve_background( *, param, thermo_module = 'RECFAST', rtol: float = 1e-5, 
     # param['adotrad'] = 2.8948e-7 * param['Tcmb']**2 # Hubble during radiation domination
 
     param['amnu'] = param['mnu'] * c2ok / param['Tcmb'] # conversion factor for Neutrinos masses (m_nu*c**2/(k_B*T_nu0)
-
-
-    if thermo_module == 'CLASS':
-        amin = jnp.min( class_thermo['scale factor a'] )
-        amax = jnp.max( class_thermo['scale factor a'] )
 
     # Compute the scale factor linearly spaced in log(a)
     a = jnp.geomspace(amin*0.9, amax*1.1, num_neutrino)
@@ -65,6 +56,22 @@ def evolve_background( *, param, thermo_module = 'RECFAST', rtol: float = 1e-5, 
                         param['Omegak'], param['Neff'], param['Nmnu'], 
                         param['logrhonu_of_loga_spline']), amin, amax )
     )
+
+    return param
+
+
+def evolve_background( *, param, thermo_module = 'RECFAST', rtol: float = 1e-5, atol: float = 1e-7, order: int = 5, class_thermo = None ):
+    num_thermo   = 1024 # length of thermal history arrays
+    c2ok = 1.62581581e4 # K / eV
+
+    amin = 1e-9
+    amax = 1.01
+
+    if thermo_module == 'CLASS':
+        amin = jnp.min( class_thermo['scale factor a'] )
+        amax = jnp.max( class_thermo['scale factor a'] )
+    
+    param = setup_background_evolution( amin=amin, amax=amax, param=param )
 
     if thermo_module == 'RECFAST':
         # Compute the thermal history
@@ -132,8 +139,13 @@ def evolve_background( *, param, thermo_module = 'RECFAST', rtol: float = 1e-5, 
     # aprimeoa = jnp.sqrt( grho_v / 3.0 )
     aprimeoa = get_aprimeoa( param=param, aexp=aexp )
 
-    xe        = param['xe_of_tau_spline'].evaluate( tau )
-    xeprime   = param['xe_of_tau_spline'].derivative( tau )
+    tau_pre_recomb = param['tau_of_a_spline'].evaluate( 1e-4 )
+    xe_full   = 1 + param['YHe'] / (1 - param['YHe'])
+    xe        = jnp.where( tau <= tau_pre_recomb, xe_full, param['xe_of_tau_spline'].evaluate( tau ) )
+    xeprime   = jnp.where( tau <= tau_pre_recomb, 0.0, param['xe_of_tau_spline'].derivative( tau ) )
+
+    # xe = param['xe_of_tau_spline'].evaluate( tau )
+    # xeprime = param['xe_of_tau_spline'].derivative( tau )
     # xepprime  = param['xe_of_tau_spline'].derivative2( tau )
     opac      = xe * akthom / aexp**2
 

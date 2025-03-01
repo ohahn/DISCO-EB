@@ -33,6 +33,7 @@ from typing import Tuple
 from .cosmo import dadtau, dtauda_, get_aprimeoa
 
 from .ode_integrators_stiff import GRKT4
+# from diffrax import Tsit5
 
 # Pre-compute constants
 const_G = 6.67430e-11               # Gravitational constant [m^3/kg/s^2], PDG 2023
@@ -44,6 +45,10 @@ const_h       = 6.62607015e-34      # Planck's constant [Js], PDG 2023
 const_kB      = 1.380649e-23        # Boltzman's constant [J/K], PDG 2023
 const_sigma   = 6.6524587321e-29    # Thomson scattering cross section [m^2], PDG 2023
 const_arad = 4 * 5.670374419e-8 / const_c # Radiation constant [Ws/m^3/K^4], PDG 2023
+
+# bigH = 100.0e3/(1.0e6*3.0856775807e16)  # Ho in s-1
+bigH = 3.2407792902755102e-18       # Ho in s-1 
+const_dens_fac = 11.223810928601939 # 3 * bigH**2 / (8 * jnp.pi * const_G * const_mH)
 
 const_c2ok    = 1.62581581e4 # K / eV
 const_c_Mpc_s = 9.71561189e-15 # Mpc/s
@@ -79,8 +84,7 @@ zGauss2 = 6.75                      # ln(1+z) central value of the 2nd Gaussian
 wGauss1 = 0.18                      # width of the 1st Gaussian
 wGauss2 = 0.33                      # width of the 2nd Gaussian
 
-H_frac = 1.e-3
-bigH = 100.0e3/(1.0e6*3.0856775807e16)  # Ho in s-1
+H_frac = 1.e-3 
 
 Lalpha = 1.0/L_H_alpha                        # Ly alpha wavelength in SI units
 Lalpha_He = 1.0/L_He_2p                       # Helium I 2p-1s wavelength in SI units
@@ -128,9 +132,7 @@ def ionization(a, y, params):
   mu_H = 1.0/(1.0-param['YHe'])
   # mu_T = const_mHe_mH/(const_mHe_mH-(const_mHe_mH-1.0)*param['YHe'])
   fHe = param['YHe']/(const_mHe_mH*(1.0-param['YHe']))
-  Nnow = 3.0 * HO * HO * param['Omegab'] / (8.0 * jnp.pi * const_G * mu_H * const_mH)
-  # fnu = (21.0 / 8.0) * (4.0 / 11.0)**(4.0 / 3.0)
-  # z_eq = (3.0 * (HO * const_c)**2 / (8.0 * jnp.pi * const_G * const_arad * (1.0 + fnu) * param['Tcmb']**4)) * param['Omegam'] - 1.0
+  Nnow = const_dens_fac * H * H * param['Omegab'] / mu_H
 
   x_H = y[0]
   x_He = y[1]
@@ -142,16 +144,10 @@ def ionization(a, y, params):
   n_He = fHe * n
   Trad = param['Tcmb'] * (1 + z)
   z_term = (1 + z)
-  # z3_term = z_term**3
-  # z4_term = z_term**4
   
   # Hubble parameter calculation
-  # Hz_term = param['Omegam'] * z3_term
-  # Hz = HO * jnp.sqrt(z4_term / (1 + z_eq) * param['Omegam'] + Hz_term + param['Omegak'] * z_term**2 + param['OmegaDE'])
-
-  # jax.debug.print("{Hz} - {hh}",Hz=Hz,hh=get_aprimeoa(param=param, aexp=a) / a * bigH / 100. * const_c/1000.)
   # Hprime = a'/a, dtau = dt/a -> da/dtau/a = da/dt = Ha
-  Hz = get_aprimeoa(param=param, aexp=a) / a * const_c * 1e-5 * bigH 
+  Hz = (1e-5*get_aprimeoa(param=param, aexp=a)) / a * const_c * bigH
   
   # Temperature and rate calculations
   Tmat_1e4 = Tmat / 1e4
@@ -288,6 +284,7 @@ def solve_ionization( *, astart : float, aend : float, ystart : jnp.ndarray, rto
   sol =drx.diffeqsolve(
         terms=drx.ODETerm(ionization),
         solver=GRKT4(),
+        # solver=Tsit5(),
         t0=astart,
         t1=aend,
         dt0=jnp.abs(astart*1e-3),
@@ -314,7 +311,6 @@ def Saha_HeII( a, param ):
       return rho_c * Omegab / (const_mH * mu_H) / a**3
     T = param['Tcmb'] / a
     betaE = const_EionHe12s / T
-    # param['fHe'] = param['YHe']/(const_mHe_mH*(1.0-param['YHe']))
     A = 1 + param['fHe']
     B = 1 + 2*param['fHe']
     R = (2*jnp.pi* const_me * const_kB / const_h**2 * T )**1.5 / NHnow( a, param['YHe'], param['H0'], param['Omegab'] ) * jnp.exp( - betaE )
@@ -342,7 +338,7 @@ def compute_thermal_history( *, a0 : float, a1 : float, N : int, rtol : float = 
       Tuple[jnp.ndarray, jnp.ndarray]: [xeHI, xeHeII, Tm, dxHIda, dxHeIda, dTmda], scale factor
   """
 
-  a = jnp.geomspace(a0, a1, N+1 )
+  a = jnp.append(jnp.geomspace(a0,1e-4,16,endpoint=False),jnp.geomspace(1e-4, a1, N+1-16 ))
   y_init= jnp.zeros((6, N))
 
   H = param['H0']/100.0
