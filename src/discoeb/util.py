@@ -161,7 +161,7 @@ def spherical_bessel_( n : int, x : float ):
   Licensing
   ---------
     This routine is adapted from FORTRAN code copyrighted by Shanjie Zhang 
-    and Jianming Jin.  However, they give permission to incorporate this 
+    and Jianming Jin.  However, they give permission to incorporate that 
     routine into a user program provided that the copyright is acknowledged.
 
     Shanjie Zhang, Jianming Jin,
@@ -254,7 +254,7 @@ def msta1(x, mp ):
   Licensing
   ---------
     This routine is adapted from FORTRAN code copyrighted by Shanjie Zhang 
-    and Jianming Jin.  However, they give permission to incorporate this 
+    and Jianming Jin.  However, they give permission to incorporate that
     routine into a user program provided that the copyright is acknowledged.
 
     Shanjie Zhang, Jianming Jin,
@@ -312,7 +312,7 @@ def msta2( x : float, n : int, mp : float ):
   Licensing
   ---------
     This routine is adapted from FORTRAN code copyrighted by Shanjie Zhang 
-    and Jianming Jin.  However, they give permission to incorporate this 
+    and Jianming Jin.  However, they give permission to incorporate that
     routine into a user program provided that the copyright is acknowledged.
 
     Shanjie Zhang, Jianming Jin,
