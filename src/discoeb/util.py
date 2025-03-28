@@ -158,6 +158,18 @@ def spherical_bessel_( n : int, x : float ):
   djn : float
     Value of the derivative of the Bessel function.
 
+  Licensing
+  ---------
+    This routine is adapted from FORTRAN code copyrighted by Shanjie Zhang 
+    and Jianming Jin.  However, they give permission to incorporate that 
+    routine into a user program provided that the copyright is acknowledged.
+
+    Shanjie Zhang, Jianming Jin,
+    Computation of Special Functions,
+    Wiley, 1996,
+    ISBN: 0-471-11963-6,
+    LC: QA351.C45.
+
   """
   nm = n
   sj = jnp.zeros(n+1)
@@ -239,6 +251,18 @@ def msta1(x, mp ):
   int
     Starting point.
 
+  Licensing
+  ---------
+    This routine is adapted from FORTRAN code copyrighted by Shanjie Zhang 
+    and Jianming Jin.  However, they give permission to incorporate that
+    routine into a user program provided that the copyright is acknowledged.
+
+    Shanjie Zhang, Jianming Jin,
+    Computation of Special Functions,
+    Wiley, 1996,
+    ISBN: 0-471-11963-6,
+    LC: QA351.C45.
+
   """
   a0 = jnp.abs(x)
   n0 = (1.1 * a0).astype(int) + 1
@@ -285,6 +309,17 @@ def msta2( x : float, n : int, mp : float ):
   int
     Starting point.
 
+  Licensing
+  ---------
+    This routine is adapted from FORTRAN code copyrighted by Shanjie Zhang 
+    and Jianming Jin.  However, they give permission to incorporate that
+    routine into a user program provided that the copyright is acknowledged.
+
+    Shanjie Zhang, Jianming Jin,
+    Computation of Special Functions,
+    Wiley, 1996,
+    ISBN: 0-471-11963-6,
+    LC: QA351.C45.
   """
   if x.dtype == jnp.float32:
     maxit = 10
