@@ -705,7 +705,7 @@ def _rms_norm_jvp(x, tx):
 def evolve_one_mode( *, tau_max, tau_out, param, kmode, 
                         lmaxg : int, lmaxgp : int, lmaxr : int, lmaxnu : int,
                         nqmax : int, rtol: float, atol: float,
-                        pcoeff : float, icoeff : float, dcoeff : float, factormax : float, factormin : float, max_steps : int  ):
+                        pcoeff : float, icoeff : float, dcoeff : float, factormax : float, factormin : float, max_steps : int, return_full : bool = False):
 
     modelX_ = VectorField( 
         lambda tau, y , params : model_synchronous( tau=tau, y=y, param=params[0], kmode=params[1],  
@@ -747,10 +747,14 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
     saveat = drx.SaveAt(ts=tau_out)
     sol = DEsolve_implicit( model=modelX, t0=tau_start, t1=tau_max, y0=y0, saveat=saveat, kmode=kmode )
 
-    # convert outputs
-    yout = jax.vmap( lambda y : convert_to_output_variables( y=y, param=param, kmode=kmode, 
-                                                   lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax) )( sol.ys )
-    
+    if not return_full:
+        # convert outputs
+        yout = jax.vmap( lambda y : convert_to_output_variables( y=y, param=param, kmode=kmode, 
+                                                    lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax) )( sol.ys )
+    else:
+        # return full solution output
+        yout = sol.ys
+        
     return yout
 
 
@@ -875,7 +879,7 @@ def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k 
                          lmaxg : int = 11, lmaxgp : int = 11, lmaxr : int = 11, lmaxnu : int = 8,
                          nqmax : int = 3, rtol: float = 1e-4, atol: float = 1e-4,
                          pcoeff : float = 0.25, icoeff : float = 0.80, dcoeff : float = 0.0,
-                         factormax : float = 20.0, factormin : float = 0.3, max_steps : int = 2048):
+                         factormax : float = 20.0, factormin : float = 0.3, max_steps : int = 2048, return_full : bool = False ):
     """evolve cosmological perturbations in the synchronous gauge
 
     Parameters
@@ -919,7 +923,6 @@ def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k 
     tau_out = jax.vmap( lambda a: param['tau_of_a_spline'].evaluate(a) )(aexp_out)
     tau_max = jnp.max(tau_out)
     nout = aexp_out.shape[0]
-    param['nout'] = nout
     
     # set up ICs and solve ODEs for all the modes
     y1 = jax.vmap(
@@ -927,11 +930,19 @@ def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k 
                                     param=param, kmode=k, lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, 
                                     lmaxnu=lmaxnu, nqmax=nqmax, rtol=rtol, atol=atol,
                                     pcoeff=pcoeff, icoeff=icoeff, dcoeff=dcoeff, 
-                                    factormax=factormax, factormin=factormin, max_steps=max_steps ),
+                                    factormax=factormax, factormin=factormin, max_steps=max_steps, return_full=return_full ),
                                     in_axes=0
     )(kmodes)
+
+    param['lmaxg'] = lmaxg
+    param['lmaxgp'] = lmaxgp
+    param['lmaxr'] = lmaxr
+    param['lmaxnu'] = lmaxnu
+    param['nqmax'] = nqmax
+    param['nout'] = nout
+    param['tau_out'] = tau_out
     
-    return y1, kmodes
+    return y1, kmodes, param
 
 
 def evolve_perturbations_batched( *, param, aexp_out, kmin : float, kmax : float, num_k : int,
