@@ -47,6 +47,36 @@ def nu_perturb( a : float, amnu: float, psi0: jax.Array, psi1 : jax.Array, psi2 
 
     return drhonu, dpnu, fnu, shearnu
 
+def nu_perturb_prime( a : float, amnu : float, aprimeoa : float, psi0: jax.Array, psi2: jax.Array, psi0prime : jax.Array, psi2prime : jax.Array, nqmax : int ) -> tuple[jax.Array, jax.Array]:
+    """ Compute the time derivative of the mean density in massive neutrinos 
+          and the shear perturbation.
+
+    Args:
+        a (float): scale factor
+        aprimeoa (float): conformal Hubble rate
+        amnu (float): neutrino mass in units of neutrino temperature (m_nu*c**2/(k_B*T_nu0).
+        psi0 (jax.Array): l=0 neutrino perturbations for all momentum bins
+        psi2 (jax.Array): l=2 neutrino perturbations for all momentum bins
+        psi0prime (jax.Array): time derivative of l=0 neutrino perturbations for all momentum bins
+        psi2prime (jax.Array): time derivative of l=2 neutrino perturbations for all momentum bins
+        nqmax (int): number of momentum bins
+
+    Returns:
+        _type_: rho_nu_prime, shear_nu_prime
+    """
+    
+    q, w = get_neutrino_momentum_bins( nqmax )
+    aq = a * amnu / q
+    aqprime = aprimeoa * aq
+    v = 1 / jnp.sqrt(1 + aq**2)
+    vprime = -aq*aqprime / (1+aq**2)**1.5
+
+    # TODO: DOUBLE CHECK THESE:
+    rho_nu_prime   = jnp.sum(w * (psi0prime / v - psi0 / v**2 * vprime))
+    shear_nu_prime = jnp.sum(w * (psi2prime*v + psi2*vprime)) * 2 / 3
+
+    return rho_nu_prime, shear_nu_prime
+
 
 # @partial(jax.jit, static_argnames=('lmaxg', 'lmaxgp', 'lmaxr', 'lmaxnu', 'nqmax'))
 def model_synchronous(*, tau, y, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, nqmax ):     
@@ -754,7 +784,7 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
     else:
         # return full solution output
         yout = sol.ys
-        
+
     return yout
 
 
@@ -879,7 +909,7 @@ def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k 
                          lmaxg : int = 11, lmaxgp : int = 11, lmaxr : int = 11, lmaxnu : int = 8,
                          nqmax : int = 3, rtol: float = 1e-4, atol: float = 1e-4,
                          pcoeff : float = 0.25, icoeff : float = 0.80, dcoeff : float = 0.0,
-                         factormax : float = 20.0, factormin : float = 0.3, max_steps : int = 2048, return_full : bool = False ):
+                         factormax : float = 20.0, factormin : float = 0.3, max_steps : int = 2048, return_full : bool = False, dologk : bool = True):
     """evolve cosmological perturbations in the synchronous gauge
 
     Parameters
@@ -916,7 +946,10 @@ def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k 
     k : jnp.ndarray
         array of shape (num_k) containing the wavenumbers [in units 1/Mpc]
     """
-    kmodes = jnp.geomspace(kmin, kmax, num_k)
+    if dologk:
+        kmodes = jnp.geomspace(kmin, kmax, num_k)
+    else:
+        kmodes = jnp.linspace(kmin, kmax, num_k)
     
 
     # determine output times from aexp_out
