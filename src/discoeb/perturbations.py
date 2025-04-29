@@ -15,8 +15,6 @@ from .ode_integrators_stiff import Rodas5, Rodas5Transformed, Rodas5Batched
 from diffrax import Kvaerno5
 
 
-
-# @partial( jax.jit, static_argnames=('nqmax0',) )
 def nu_perturb( a : float, amnu: float, psi0: jax.Array, psi1 : jax.Array, psi2 : jax.Array, nqmax : int ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
     """ Compute the perturbations of density, energy flux, pressure, and
         shear stress of one flavor of massive neutrinos, in units of the mean
@@ -30,24 +28,24 @@ def nu_perturb( a : float, amnu: float, psi0: jax.Array, psi1 : jax.Array, psi2 
         psi1 (jax.Array): l=1 neutrino perturbations for all momentum bins
         psi2 (jax.Array): l=2 neutrino perturbations for all momentum bins
         nq (int, optional): _description_. Defaults to 1000.
-        qmax (float, optional): _description_. Defaults to 30..
+        nqmax (int): number of momentum bins
 
     Returns:
         _type_: drhonu, dpnu, fnu, shearnu
     """
     
     q, w = get_neutrino_momentum_bins( nqmax )
-    aq = a * amnu / q
-    v = 1 / jnp.sqrt(1 + aq**2)
+    aq   = a * amnu / q
+    v    = 1 / jnp.sqrt(1 + aq**2)
 
-    drhonu = jnp.sum(w * psi0 / v)
-    dpnu = jnp.sum(w * psi0 * v) / 3
-    fnu = jnp.sum(w * psi1) 
+    drhonu  = jnp.sum(w * psi0 / v)
+    dpnu    = jnp.sum(w * psi0 * v) / 3
+    fnu     = jnp.sum(w * psi1) 
     shearnu = jnp.sum(w * psi2 * v) * 2 / 3
 
     return drhonu, dpnu, fnu, shearnu
 
-def nu_perturb_prime( a : float, amnu : float, aprimeoa : float, psi0: jax.Array, psi2: jax.Array, psi0prime : jax.Array, psi2prime : jax.Array, nqmax : int ) -> tuple[jax.Array, jax.Array]:
+def nu_perturb_prime( *, a : float, amnu : float, aprimeoa : float, psi0: jax.Array, psi2: jax.Array, psi0prime : jax.Array, psi2prime : jax.Array, nqmax : int ) -> tuple[jax.Array, jax.Array]:
     """ Compute the time derivative of the mean density in massive neutrinos 
           and the shear perturbation.
 
@@ -65,20 +63,16 @@ def nu_perturb_prime( a : float, amnu : float, aprimeoa : float, psi0: jax.Array
         _type_: rho_nu_prime, shear_nu_prime
     """
     
-    q, w = get_neutrino_momentum_bins( nqmax )
-    aq = a * amnu / q
-    aqprime = aprimeoa * aq
-    v = 1 / jnp.sqrt(1 + aq**2)
-    vprime = -aq*aqprime / (1+aq**2)**1.5
+    q, w   = get_neutrino_momentum_bins( nqmax )
+    aq     = a * amnu / q
+    v      = 1 / jnp.sqrt(1 + aq**2)
+    vprime = -0.5*aq*aprimeoa * v**3
 
-    # TODO: DOUBLE CHECK THESE:
     rho_nu_prime   = jnp.sum(w * (psi0prime / v - psi0 / v**2 * vprime))
     shear_nu_prime = jnp.sum(w * (psi2prime*v + psi2*vprime)) * 2 / 3
 
     return rho_nu_prime, shear_nu_prime
 
-
-# @partial(jax.jit, static_argnames=('lmaxg', 'lmaxgp', 'lmaxr', 'lmaxnu', 'nqmax'))
 def model_synchronous(*, tau, y, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, nqmax ):     
     """Solve the synchronous gauge perturbation equations for a single mode.
 
@@ -323,7 +317,6 @@ def model_synchronous(*, tau, y, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, nqm
     f = f.at[idxr+lmaxr].set( kmode * y[idxr+lmaxr-1] - (lmaxr + 1) / tau * y[idxr+lmaxr] )
 
     # --- Massive neutrino equations of motion --------------------------------------------------------
-    # q = jnp.arange(1, nqmax + 1) - 0.5  # so dq == 1 # if not using CAMB approx
     q, _ = get_neutrino_momentum_bins( nqmax )
     aq = a * param['amnu'] / q
     v = 1 / jnp.sqrt(1 + aq**2)
@@ -763,7 +756,7 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
             dt0=jnp.minimum(t0/4, 0.5*(t1-t0)),
             y0=y0,
             saveat=saveat,  
-            stepsize_controller = drx.PIDController(rtol=rtol, atol=atol, norm=lambda t:rms_norm_filtered(t,jnp.array([0,2,3,5,6,7]), jnp.array([1,kmode**2,1,1,1/kmode**2,1])), 
+            stepsize_controller = drx.PIDController(rtol=rtol, atol=atol, norm=lambda t:rms_norm_filtered(t,jnp.array([0,2,3,5,6,7,8,9]), jnp.array([1,kmode**2,1,1,1/kmode**2,1,1/kmode**2,1/kmode**2])), 
                                                     pcoeff=pcoeff, icoeff=icoeff, dcoeff=dcoeff, factormax=factormax, factormin=factormin),
             # default controller has icoeff=1, pcoeff=0, dcoeff=0
             max_steps=max_steps,
@@ -950,6 +943,8 @@ def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k 
         kmodes = jnp.geomspace(kmin, kmax, num_k)
     else:
         kmodes = jnp.linspace(kmin, kmax, num_k)
+        # kkmin = kmax / num_k
+        # kmodes = jnp.append(jnp.geomspace(kmin,kkmin,16,endpoint=False),jnp.linspace(kkmin, kmax, num_k))
     
 
     # determine output times from aexp_out
