@@ -115,243 +115,129 @@ def generalized_gauss_laguerre_weights(n, alpha):
     return nodes, weights
 
 
-def spherical_bessel( lmax, x ):
+def continuedfraction_Jratio(l, x, niter=5):
   """
-  Compute spherical Bessel functions jn(x) and their derivatives.
+  Compute the ratio J_{nu-1}(x)/J_{nu}(x) using the continued fraction (eq. 
+    10.10.1 of https://dlmf.nist.gov/10.10) with a fixed number of iterations.
 
   Parameters
   ----------
-  lmax : int
-    Maximum order of the Bessel functions, lmax>=0.
+  l : float
+    Order of the Bessel function.
   x : float
-    Argument at which the Bessel function is evaluated.
+    Argument of the Bessel function.
+  niter : int
+    Number of iterations for the continued fraction.
 
   Returns
   -------
-  jn : NDArray of float, shape (lmax+1,2,len(x))
-    Values of the Bessel function and derivatives for each order and for all x
+  float
+    The ratio J_{l-1}(x)/J_{l}(x).
   """
-  x = jnp.atleast_1d(x)
+  f0 = 2.0 * l / x
+  C0 = f0 
+  D0 = jnp.zeros_like(x) 
 
-  assert lmax >= 0, "spherical_bessel: lmax must be >= 0"
+  def body_fn(carry, _):
+    f0, C0, D0 = carry
+    j = _ + 1
+    bj = (-1.0)**j * 2.0 * (l + j) / x
+    Cj = bj + 1.0 / C0
+    Dj = 1.0 / (bj + D0)
+    fj = f0 * Cj * Dj
+    return (fj, Cj, Dj), None
 
-  res = jax.vmap( lambda xx: jnp.asarray(spherical_bessel_( lmax, xx )) )( x )
-
-  return res
-
-
-def spherical_bessel_( n : int, x : float ):
-  """
-  Compute spherical Bessel functions jn(x) and their derivatives.
-
-  Parameters
-  ----------
-  n : int
-    Maximum order of the Bessel functions.
-  x : float
-    Argument at which the Bessel functions jn are evaluated.
-
-  Returns
-  -------
-  jn : float
-    Values of the Bessel function.
-  djn : float
-    Value of the derivative of the Bessel function.
-
-  Licensing
-  ---------
-    This routine is adapted from FORTRAN code copyrighted by Shanjie Zhang 
-    and Jianming Jin.  However, they give permission to incorporate that 
-    routine into a user program provided that the copyright is acknowledged.
-
-    Shanjie Zhang, Jianming Jin,
-    Computation of Special Functions,
-    Wiley, 1996,
-    ISBN: 0-471-11963-6,
-    LC: QA351.C45.
-
-  """
-  nm = n
-  sj = jnp.zeros(n+1)
-  dj = jnp.zeros(n+1)
-
-  eps = jnp.sqrt(jnp.finfo(x.dtype).eps)
-  tiny = (jnp.finfo(x.dtype).tiny)**(1/3)
-
-  if x.dtype == jnp.float32:
-    m1, m2 = 25, 5
-  elif x.dtype == jnp.float64:
-    m1, m2 = 200, 15
+  (f_final, _, _), _ = jax.lax.scan(body_fn, (f0, C0, D0), jnp.arange(niter))
+  return f_final
 
 
-  # n=0: j0(x) = sin(x)/x
-  sj = sj.at[0].set( jnp.where( jnp.abs(x) < eps , 1.0-x**2/6, jnp.sin(x) / x ) )
-  dj = dj.at[0].set( jnp.where( jnp.abs(x) < eps , -x/3, (jnp.cos(x) - jnp.sin(x) / x) / x ) )
-
-  # n=1: j1(x) = (sin(x) - x cos(x))/x^2
-  sj = sj.at[1].set( jnp.where( jnp.abs(x) < eps , x/3 - x**3/30 ,(sj[0] - jnp.cos(x)) / x ) )
-  dj = dj.at[1].set( jnp.where( jnp.abs(x) < eps , 1/3 - x**2/10 ,(sj[0]+dj[0]/x + (sj[0]-jnp.cos(x))/x**2) ) )
-
-  # n>=2: recurrence relation
-  if n >= 2:
+# @partial(jax.jit, static_argnames=['lmax','niterfrac'])
+def spherical_bessel(lmax, x, niterfrac=5):
+    """
+    Spherical Bessel function computation (GPU-optimized), uses forward recurrence formula 
+    (eq. 10.6.1 of https://dlmf.nist.gov/10.6) for maximum parallel efficiency, which is 
+    however unstable for |x| < \ell, so there the continued fraction expansion (eq. 
+    10.10.1 of https://dlmf.nist.gov/10.10) is used instead. Current performance bottleneck
+    is that the continued fraction has to be evluated.
     
-    x = jnp.maximum(x, tiny)
-
-    sa = sj[0]
-    sb = sj[1]
-    m  = msta1( x, m1 )
-    nm = jnp.where(m < n, m, nm )
-    m  = jnp.where(m < n, m, msta2(x, n, m2 ))
-
-    def condition(state):
-        _, _, _, _, k = state
-        return k >= 0
-
-    def body(state):
-        facc, f0, f1, x, k = state
-        f = (2.0 * k + 3.0) * f1 / x - f0
-        # Update the state with the new values of f0, f1, and decrement k
-        facc = facc.at[k].set( f )
-        return facc, f1, f, x, k - 1
+    Parameters
+    ----------
+    lmax : int
+      The maximum order of the spherical Bessel functions to compute.
+    x : array-like
+      Input values for which the spherical Bessel functions are computed. Can be a scalar or an array.
+    niterfrac : int, optional
+      Number of iterations for the continued fraction expansion, by default 5.
+    Returns
+    -------
+    jnp.ndarray
+      A stacked array of shape (2, n_x, lmax + 1), where the first sub-array contains the 
+      spherical Bessel functions `j_l(x)` for orders `l = 0, ..., lmax`, and the second 
+      sub-array contains their derivatives `j'_l(x)`.
+    """
+    x = jnp.atleast_1d(x)
+    n_x = x.shape[0]
     
-    f_values = jnp.zeros( n + 1 )
-    f_values, final_f0, final_f1, _, _ = jax.lax.while_loop( condition, body, (f_values, 0.0, tiny, x, m) )
-
-    cs = jnp.zeros_like( sa )
-    cs = jnp.where( jnp.abs(sa) > jnp.abs(sb), sa / final_f1, cs )
-    cs = jnp.where( jnp.abs(sa) <= jnp.abs(sb), sb / final_f0, cs ) 
+    # Constants
+    eps = jnp.sqrt(jnp.finfo(x.dtype).eps)
+    tiny = (jnp.finfo(x.dtype).tiny)**(1/3)
     
-    k_range = jnp.arange(n, 1, -1)
-    sj = sj.at[k_range].set(cs * f_values[k_range])
-
-    k_range = jnp.arange(1, n + 1)
-    dj = dj.at[k_range].set( (sj[k_range-1] - (k_range + 1.0)) * sj[k_range] / x )
-
-  return sj, dj
-
-
-def envj( n : int, x : float ) -> float:
-  return jnp.log10(6.28*n)/2 - n*jnp.log10(1.36*x/n)
-
-
-def msta1(x, mp ):
-  """
-  spherical_bessel helper function: determine the starting point for backward recurrence such 
-  that the magnitude of Jn(x) at that point is about 10^(-MP).
-
-  Parameters
-  ----------
-  x : float
-    Argument of jn(x).
-  mp : float
-    Value of magnitude.
-
-  Returns
-  -------
-  int
-    Starting point.
-
-  Licensing
-  ---------
-    This routine is adapted from FORTRAN code copyrighted by Shanjie Zhang 
-    and Jianming Jin.  However, they give permission to incorporate that
-    routine into a user program provided that the copyright is acknowledged.
-
-    Shanjie Zhang, Jianming Jin,
-    Computation of Special Functions,
-    Wiley, 1996,
-    ISBN: 0-471-11963-6,
-    LC: QA351.C45.
-
-  """
-  a0 = jnp.abs(x)
-  n0 = (1.1 * a0).astype(int) + 1
-  f0 = envj(n0, a0) - mp
-  n1 = n0 + 5
-  f1 = envj(n1, a0) - mp
-
-  def cond_fun(loop_vars):
-      n0, n1, _, _, it = loop_vars
-      return (jnp.abs(n0-n1) >= 1) & (it < 20)
-
-  def body_fun(loop_vars):
-      n0, n1, f0, f1, it = loop_vars
-      nn = (n1 - (n1 - n0) / (1.0 - f0 / f1)).astype(int)
-      f = envj(nn, a0) - mp
-      n0_update = n1
-      f0_update = f1
-      n1_update = nn
-      f1_update = f
-      return (n0_update, n1_update, f0_update, f1_update, it + 1)
-
-  initial_vars = (n0, n1, f0, f1, 0)
-  _, nn_final, _, _, _ = jax.lax.while_loop(cond_fun, body_fun, initial_vars)
-
-  return nn_final
-
-
-def msta2( x : float, n : int, mp : float ):
-  """
-  spherical_bessel helper function: determine the starting point for backward recurrence 
-  such that all Jn(x) has MP significant digits.
-
-  Parameters
-  ----------
-  x : float
-    Argument of jn(x).
-  n : int
-    Order of jn(x).
-  mp : float
-    Significant digit.
-
-  Returns
-  -------
-  int
-    Starting point.
-
-  Licensing
-  ---------
-    This routine is adapted from FORTRAN code copyrighted by Shanjie Zhang 
-    and Jianming Jin.  However, they give permission to incorporate that
-    routine into a user program provided that the copyright is acknowledged.
-
-    Shanjie Zhang, Jianming Jin,
-    Computation of Special Functions,
-    Wiley, 1996,
-    ISBN: 0-471-11963-6,
-    LC: QA351.C45.
-  """
-  if x.dtype == jnp.float32:
-    maxit = 10
-  else:
-    maxit = 20
-
-  a0 = jnp.abs(x)
-  hmp = 0.5 * mp
-  ejn = envj(n, a0)
-  obj = jnp.where(ejn <= hmp, mp, hmp + ejn)
-  n0  = jnp.where(ejn <= hmp, (1.1 * a0).astype(int) + 1, n)
-
-  f0 = envj(n0, a0) - obj
-  n1 = n0 + 5
-  f1 = envj(n1, a0) - obj
-
-  def cond_fun(vars):
-      n0, n1, _, _, iter_count = vars
-      return (jnp.abs(n0-n1) >= 1) & (iter_count < maxit)
-
-  def body_fun(vars):
-      n0, n1, f0, f1, iter_count = vars
-      nn = (n1 - (n1 - n0) / (1.0 - f0 / f1)).astype(int)
-      f = envj(nn, a0) - obj
-      return (n1, nn, f1, f, iter_count + 1)
-
-  initial_vars = (n0, n1, f0, f1, 0)
-  _, nn_final, _, _, _ = jax.lax.while_loop(cond_fun, body_fun, initial_vars)
-
-  return nn_final + 10
-
-
+    x_abs = jnp.abs(x)
+    small_x_mask = x_abs < eps
+    
+    # Pre-allocate output arrays
+    sj = jnp.zeros((n_x, lmax + 1))
+    dj = jnp.zeros((n_x, lmax + 1))
+    
+    # Compute trigonometric functions once
+    sin_x = jnp.sin(x)
+    cos_x = jnp.cos(x)
+    
+    # j0(x) = sin(x)/x
+    j0_small = 1.0 - x**2/6
+    j0_large = sin_x / x
+    sj = sj.at[:, 0].set(jnp.where(small_x_mask, j0_small, j0_large))
+    
+    # dj0(x)
+    dj0_small = -x/3
+    dj0_large = (cos_x - sin_x / x) / x
+    dj = dj.at[:, 0].set(jnp.where(small_x_mask, dj0_small, dj0_large))
+    
+    if lmax >= 1:
+        # j1(x) = (sin(x) - x*cos(x))/x^2
+        j1_small = x/3 - x**3/30
+        j1_large = (sj[:, 0] - cos_x) / x
+        sj = sj.at[:, 1].set(jnp.where(small_x_mask, j1_small, j1_large))
+        
+        # dj1(x)
+        dj1_small = 1/3 - x**2/10
+        dj1_large = sj[:, 0] + dj[:, 0]/x + (sj[:, 0] - cos_x)/x**2
+        dj = dj.at[:, 1].set(jnp.where(small_x_mask, dj1_small, dj1_large))
+    
+    if lmax >= 2:
+        x_safe = jnp.maximum(x_abs, tiny)
+        
+        # Use forward recurrence for better GPU performance (more parallel)
+        # (eq. 10.6.1 of https://dlmf.nist.gov/10.6)
+        # j_{n+1} = (2n+1)/x * j_n - j_{n-1}
+        def forward_step(n, sj_arr):
+            j_next = jnp.where( (x_safe < n-jnp.sqrt(n)), 
+                               sj_arr[:, n] / continuedfraction_Jratio(n+1.5, x_safe, niterfrac), 
+                               (2.0 * n + 1.0) * sj_arr[:, n] / x_safe - sj_arr[:, n-1] )
+            return sj_arr.at[:, n+1].set(j_next)
+        
+        # Apply forward recurrence
+        sj = jax.lax.fori_loop(1, lmax, forward_step, sj)
+        
+        # Compute derivatives using the recurrence relation (eq. 10.6.2 of https://dlmf.nist.gov/10.6)
+        # dj_n = j_{n-1} - (n+1)/x * j_n
+        l_indices = jnp.arange(1, lmax + 1)
+        x_expanded = x_safe[:, None]
+        
+        dj_vals = sj[:, l_indices - 1] - (l_indices + 1.0) * sj[:, l_indices] / x_expanded
+        dj = dj.at[:, 1:].set(dj_vals)
+    
+    return jnp.stack([sj, dj], axis=1)
 
 
 def root_find_bisect( *, func, xleft, xright, numit, param ):
