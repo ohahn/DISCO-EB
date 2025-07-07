@@ -1,5 +1,6 @@
 import jax
 import jax.numpy as jnp
+from functools import partial
 
 def lngamma_complex_e( z : complex ):
   """Log[Gamma(z)] for z complex, z not a negative integer Uses complex Lanczos method. Note that the phase part (arg)
@@ -115,10 +116,10 @@ def generalized_gauss_laguerre_weights(n, alpha):
     return nodes, weights
 
 
-def continuedfraction_Jratio(l, x, niter=5):
+def continuedfraction_Jratio(l, x, niter=8):
   """
   Compute the ratio J_{nu-1}(x)/J_{nu}(x) using the continued fraction (eq. 
-    10.10.1 of https://dlmf.nist.gov/10.10) with a fixed number of iterations.
+  10.10.1 of https://dlmf.nist.gov/10.10) with a fixed number of iterations.
 
   Parameters
   ----------
@@ -135,24 +136,21 @@ def continuedfraction_Jratio(l, x, niter=5):
     The ratio J_{l-1}(x)/J_{l}(x).
   """
   f0 = 2.0 * l / x
-  C0 = f0 
-  D0 = jnp.zeros_like(x) 
+  C0 = f0
+  D0 = jnp.zeros_like(x)
 
-  def body_fn(carry, _):
-    f0, C0, D0 = carry
-    j = _ + 1
+  for j in range(1, niter + 1):
     bj = (-1.0)**j * 2.0 * (l + j) / x
     Cj = bj + 1.0 / C0
     Dj = 1.0 / (bj + D0)
-    fj = f0 * Cj * Dj
-    return (fj, Cj, Dj), None
+    f0 = f0 * Cj * Dj
+    C0 = Cj
+    D0 = Dj
 
-  (f_final, _, _), _ = jax.lax.scan(body_fn, (f0, C0, D0), jnp.arange(niter))
-  return f_final
+  return f0
 
-
-# @partial(jax.jit, static_argnames=['lmax','niterfrac'])
-def spherical_bessel(lmax, x, niterfrac=5):
+@partial(jax.jit, static_argnames=['lmax','niterfrac'])
+def spherical_bessel(lmax, x, niterfrac=8):
     """
     Spherical Bessel function computation (GPU-optimized), uses forward recurrence formula 
     (eq. 10.6.1 of https://dlmf.nist.gov/10.6) for maximum parallel efficiency, which is 
