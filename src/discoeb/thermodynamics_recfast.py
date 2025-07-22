@@ -142,17 +142,17 @@ def model_recfast( *, logtau : float, yin : jnp.ndarray, param : dict, noiseless
   nHe1 = jax.lax.cond( xHep > (1-ε)*fHe, lambda x: 0.0, lambda x: (fHe - xHep) * nHtot, None )
 
   #  Calculate the Saha and Boltzmann equilibrium relations
-  SHe = SahaBoltzmann( gi=1, gc=2, E_ion=const_EionHe2s, T=TM )
-  fBHe = fBoltzmann( gj=1, gi=1, E=const_E2s1sHe, T=TM )
+  SHe = SahaBoltzmann( gi=1.0, gc=2.0, E_ion=const_EionHe2s, T=TM )
+  fBHe = fBoltzmann( gj=1.0, gi=1.0, E=const_E2s1sHe, T=TM )
   
-  SH = SahaBoltzmann( gi=2, gc=1, E_ion=const_EionH2s, T=TM)
-  fBH = fBoltzmann( gj=1, gi=1, E=const_E2s1sH, T=TM)
+  SH = SahaBoltzmann( gi=2.0, gc=1.0, E_ion=const_EionH2s, T=TM)
+  fBH = fBoltzmann( gj=1.0, gi=1.0, E=const_E2s1sH, T=TM)
   
   # For HeI, the energy levels of 2s and 2p are quite different.
   # Therefore the ratio b should be a boltzmann factor, and this
   # will also have to be incorporated into the derivatives wrt TM
 
-  fBHe2p2s = fBoltzmann( gj=3, gi=1, E=const_E2p2sHe, T=TM)
+  fBHe2p2s = fBoltzmann( gj=3.0, gi=1.0, E=const_E2p2sHe, T=TM)
   
   # H recombination coefficient alphaBH and
   # photoionization coefficient betaH. 
