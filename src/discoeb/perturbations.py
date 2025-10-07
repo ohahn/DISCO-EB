@@ -181,7 +181,7 @@ def model_synchronous(*, tau, y, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, nqm
     pb43 = 4.0 / 3.0 * photbar
 
     # massive neutrinos
-    rhonu = jnp.exp(param['logrhonu_of_loga_spline'].evaluate(loga)
+    rhonu = jnp.exp(param['logrhonu_of_loga_spline'].evaluate(loga))
     # pnu = jnp.exp(param['logpnu_of_loga_spline'].evaluate( jnp.log(a) ) )
 
     # ... quintessence
