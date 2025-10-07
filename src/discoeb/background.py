@@ -220,6 +220,10 @@ def evolve_background( *, param, thermo_module = 'RECFAST', rtol: float = 1e-5, 
         param['cs2a_of_tau_spline']   = spline_interpolation( tau, aexp*cs2 )
         param['tempba_of_tau_spline'] = spline_interpolation( tau, aexp*Tm )
 
+        # Pre-composed splines for direct a-to-quantity lookups (performance optimization)
+        param['xe_of_loga_spline']    = spline_interpolation( jnp.log(aexp), xe )
+        param['cs2a_of_loga_spline']  = spline_interpolation( jnp.log(aexp), aexp*cs2 )
+
     elif thermo_module == 'MB95':
 
         # Compute the thermal history
@@ -247,6 +251,10 @@ def evolve_background( *, param, thermo_module = 'RECFAST', rtol: float = 1e-5, 
         param['tau_of_a_spline'] = spline_interpolation( aexp, tau )
         param['a_of_tau_spline'] = spline_interpolation( tau, aexp )
 
+        # Pre-composed splines for direct a-to-quantity lookups (performance optimization)
+        param['xe_of_loga_spline']    = spline_interpolation( jnp.log(aexp), xe )
+        param['cs2a_of_loga_spline']  = spline_interpolation( jnp.log(aexp), aexp*cs2 )
+
     elif thermo_module == 'CLASS':
         # use input CLASS thermodynamics
         # interpolating splines for the thermal history        
@@ -258,6 +266,11 @@ def evolve_background( *, param, thermo_module = 'RECFAST', rtol: float = 1e-5, 
 
         param['aexp'] = class_thermo['scale factor a'][::-1]
         param['tau'] = class_thermo['conf. time [Mpc]'][::-1]
+
+        # Pre-composed splines for direct a-to-quantity lookups (performance optimization)
+        aexp_class = class_thermo['scale factor a'][::-1]
+        param['xe_of_loga_spline']   = spline_interpolation( jnp.log(aexp_class), class_thermo['x_e'][::-1] )
+        param['cs2a_of_loga_spline'] = spline_interpolation( jnp.log(aexp_class), aexp_class * class_thermo['c_b^2'][::-1] )
     
 
 
