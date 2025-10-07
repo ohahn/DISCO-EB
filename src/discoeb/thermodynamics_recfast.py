@@ -25,12 +25,11 @@
 ####################################################################################################################
  
 import diffrax as drx
-import jax 
+import jax
 import jax.numpy as jnp
 from jax_cosmo.scipy.integrate import romb
-from functools import partial 
+from functools import partial
 from typing import Tuple
-from .cosmo import dadtau, dtauda_, get_aprimeoa
 
 from .ode_integrators_stiff import GRKT4
 # from diffrax import Tsit5
@@ -144,9 +143,10 @@ def ionization(a, y, params):
   n_He = fHe * n
   Trad = param['Tcmb'] * (1 + z)
   z_term = (1 + z)
-  
+
   # Hubble parameter calculation
   # Hprime = a'/a, dtau = dt/a -> da/dtau/a = da/dt = Ha
+  from .background import get_aprimeoa
   Hz = (1e-5*get_aprimeoa(param=param, aexp=a)) / a * const_c * bigH
   
   # Temperature and rate calculations
@@ -436,6 +436,7 @@ def evaluate_thermo( *, param : dict, num_thermo = 2048 ) -> jax.Array:
     dTmda    = y[5,:]
     daTmda   = Tm + a * dTmda
     cs2      = const_kB/ const_mH / const_c**2 / mu * Tm * (4 - daTmda / (Tm)) /3
+    from .background import dadtau, dtauda_
     dxedtau  = (dxeHIda + param['fHe'] * dxeHeIda + dxHeIIda) * dadtau(a=a, param=param)
 
     # compute conformal times tau for all entries in a

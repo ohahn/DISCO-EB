@@ -2,7 +2,6 @@ import jax
 import jax.numpy as jnp
 
 from .util import lngamma_complex_e, root_find_bisect, savgol_filter
-from .cosmo import get_neutrino_momentum_bins, get_aprimeoa
 
 import diffrax as drx
 from jaxtyping import Array, PyTree, Scalar
@@ -13,6 +12,9 @@ import jax.flatten_util as fu
 
 from .ode_integrators_stiff import Rodas5, Rodas5Transformed, Rodas5Batched
 from diffrax import Kvaerno5
+
+# Import background functions
+from .background import get_aprimeoa, get_neutrino_momentum_bins
 
 
 
@@ -640,32 +642,21 @@ def determine_starting_time( *, param, k ):
     tau1 = param['tau_of_a_spline'].evaluate( 0.1 ) # don't start after a=0.1
     tau_k = 1.0/k
 
-    def compute_aprimeoa( a, param ):
-        # assume neutrinos fully relativistic and no DE
-        grho = (
-            param['grhom'] * param['Omegam'] / a
-            + (param['grhog'] + param['grhor'] * (param['Neff'] + param['Nmnu'])) / a**2
-        )
-        return jnp.sqrt( grho / 3.0 )
-
     def get_tauc_tauH( tau, param ):
         akthom = 2.3048e-9 * (1.0 - param['YHe']) * param['Omegab'] * param['H0']**2
         xe = param['xe_of_tau_spline'].evaluate( tau )
         a = param['a_of_tau_spline'].evaluate(tau)
         opac = xe * akthom / a**2
 
-        # grho, _ = compute_rho_p( a, param )
-
-        aprimeoa = compute_aprimeoa( a, param ) #jnp.sqrt( grho / 3.0 )
+        # Note: For starting time calculation, we use the full aprimeoa from background
+        # This is slightly different from the old radiation-only approximation but more accurate
+        aprimeoa = get_aprimeoa( param=param, aexp=a )
         return 1.0/opac, 1.0/aprimeoa
-    
-    
+
+
     def get_tauH( tau, param ):
         a = param['a_of_tau_spline'].evaluate(tau)
-
-        # grho, _ = compute_rho_p( a, param )
-
-        aprimeoa = compute_aprimeoa( a, param ) #jnp.sqrt( grho / 3.0 )
+        aprimeoa = get_aprimeoa( param=param, aexp=a )
         return 1.0/aprimeoa
 
     # condition for small k: tau_c(a) / tau_H(a) < start_small_k_at_tau_c_over_tau_h

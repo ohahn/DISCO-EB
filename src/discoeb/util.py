@@ -1,5 +1,13 @@
 import jax
 import jax.numpy as jnp
+import jax.scipy
+
+# the trapz integration has been moved from jnp to jax.scipy
+# in newer versions of jax, and might disappear altogether
+if hasattr(jnp,'trapz'):
+  integrate_trapz = jnp.trapz
+else:
+  integrate_trapz = jax.scipy.integrate.trapezoid
 
 def lngamma_complex_e( z : complex ):
   """Log[Gamma(z)] for z complex, z not a negative integer Uses complex Lanczos method. Note that the phase part (arg)

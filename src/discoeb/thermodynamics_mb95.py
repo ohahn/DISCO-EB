@@ -2,8 +2,6 @@ import jax.lax
 import jax.numpy as jnp
 from typing import Tuple
 
-from .cosmo import get_aprimeoa
-
 
 def ionize(tempb: float, a: float, adot: float, dtau: float, xe: float, YHe: float, H0: float, Omegab: float) -> float:
     # ... switch for fully implicit (switch=1.0) or semi implicit (switch=0.5);
@@ -152,6 +150,7 @@ def compute_thermo(*, param, nthermo: int):
         #     + grhom * (1-Omegam-OmegaDE) #FIXME: Omegak
         # )
         # new_adot = jnp.sqrt(grho / 3.0) * new_a
+        from .background import get_aprimeoa
         new_adot = get_aprimeoa(param=param, aexp=new_a) * new_a
 
         new_a = a + 2 * dtau / (1.0 / adot + 1.0 / new_adot)
