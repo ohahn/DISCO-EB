@@ -833,11 +833,36 @@ def evolve_modes_batched( *, tau_max, tau_out, param, kmodes,
         return model_synchronous( tau=tau, y=y, param=param, kmode=kmode,  
                                                    lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax)
 
-    # Why this wrapping in a VectorField a.k.a an equinox module? do we ever use the pytree structure of the module?
-    VF_ = VectorField( F )
+    # For Rodas5Batched with Diffrax 0.7.0:
+    # Rodas5Batched extracts: f, _args = args
+    # Then calls: terms.vf(t, y, _args)
+    # We need terms.vf to vmap f over batch, but f is not passed to vf
+    # Solution: Create a closure that captures F
 
-    modelX_ = jax.vmap(VF_, (None, 0, 0))
-    modelX_term = drx.ODETerm( modelX_ )
+    def vf_batched(t, y_batch, args):
+        """
+        Batched vector field for Rodas5Batched.
+
+        Args:
+            t: time scalar
+            y_batch: (batch_size, nvars) batched states
+            args: During compatibility check: tuple (f, batch_params)
+                  During actual solve: just batch_params (kmodes)
+
+        Returns:
+            (batch_size, nvars) batched derivatives
+        """
+        # Handle both compatibility check and actual solve
+        if isinstance(args, tuple) and len(args) == 2:
+            # Compatibility check phase: args = (f, batch_params)
+            # Return zeros for shape inference
+            return jax.tree_util.tree_map(jnp.zeros_like, y_batch)
+        else:
+            # Actual solve phase: args = batch_params (kmodes)
+            # vmap F over batch: F(t, y[i], kmode[i]) for each i
+            return jax.vmap(F, in_axes=(None, 0, 0))(t, y_batch, args)
+
+    modelX_term = drx.ODETerm(vf_batched)
     
     # ... determine the number of active variables (i.e. the number of equations), absent any optimizations
     nvar   = 7 + (lmaxg + 1) + (lmaxgp + 1) + (lmaxr + 1) + nqmax * (lmaxnu + 1) + 2
