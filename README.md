@@ -68,7 +68,7 @@ If you use DISCO-EB in your scientific work, you are required to acknowledge thi
 
 ## Required Python Packages
 - JAX
-- diffrax==0.4.1
+- diffrax
 - equinox
 - jaxtyping
 - jax_cosmo
