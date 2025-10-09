@@ -6,8 +6,8 @@ build-backend = "setuptools.build_meta"
 name = "discoeb"
 version = "0.1.0"
 dependencies = [
-    "jax==0.4.33",
-    "diffrax==0.4.1",
+    "jax",
+    "diffrax",
     "equinox",
     "jaxtyping",
     "jax_cosmo",

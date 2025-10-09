@@ -1,7 +1,6 @@
 import jax.lax
 import jax.numpy as jnp
 from typing import Tuple
-from functools import partial
 
 
 def ionize(tempb: float, a: float, adot: float, dtau: float, xe: float, YHe: float, H0: float, Omegab: float) -> float:
@@ -28,7 +27,7 @@ def ionize(tempb: float, a: float, adot: float, dtau: float, xe: float, YHe: flo
         cp1 = crec * dec2g * (1.0 - xe) / (a * adot)
         cp2 = crec * tempb * phi2 * jnp.exp(beta0 - 0.25 * tion / tempb) * (1.0 - xe) / (a * adot)
         return (1.0 + cp1) / (1.0 + cp1 + cp2)
-
+    
     cpeebles = jax.lax.cond(tempb <= 200.0, lambda: 1.0, peebles_corr)
 
     # ... integrate dxe=bb*(1-xe)-aa*xe*xe by averaging rhs at current tau
@@ -141,16 +140,18 @@ def compute_thermo(*, param, nthermo: int):
         # integrate Friedmann equation using inverse trapezoidal rule.
         new_a = a + adot * dtau
 
-        rhonu = jnp.exp(logrhonu_sp.evaluate( jnp.log(new_a) ))
-        rhoDE = new_a**(-3*(1+w_DE_0+w_DE_a)) * jnp.exp(3*(new_a-1)*w_DE_a)
+        # rhonu = jnp.exp(logrhonu_sp.evaluate( jnp.log(new_a) ))
+        # rhoDE = new_a**(-3*(1+w_DE_0+w_DE_a)) * jnp.exp(3*(new_a-1)*w_DE_a)
     
-        grho = (
-            grhom * Omegam / new_a
-            + (grhog + grhor * (Neff + Nmnu * rhonu)) / new_a**2
-            + grhom * OmegaDE * rhoDE * new_a**2
-            + grhom * (1-Omegam-OmegaDE) #FIXME: Omegak
-        )
-        new_adot = jnp.sqrt(grho / 3.0) * new_a
+        # grho = (
+        #     grhom * Omegam / new_a
+        #     + (grhog + grhor * (Neff + Nmnu * rhonu)) / new_a**2
+        #     + grhom * OmegaDE * rhoDE * new_a**2
+        #     + grhom * (1-Omegam-OmegaDE) #FIXME: Omegak
+        # )
+        # new_adot = jnp.sqrt(grho / 3.0) * new_a
+        from .background import get_aprimeoa
+        new_adot = get_aprimeoa(param=param, aexp=new_a) * new_a
 
         new_a = a + 2 * dtau / (1.0 / adot + 1.0 / new_adot)
 

@@ -1,295 +1,501 @@
+
+####################################################################################################################
+# This file is not licensed under the GNU GPL license!
+# Large portions of this code, which is part of the DISCO-EB module have been adapted from the recfast code base.
+# The original recfast code can be found at: https://www.astro.ubc.ca/people/scott/recfast.html
+# The recfast code base is distributed under the following license:
+####################################################################################################################
+ # Integrator for Cosmic Recombination of Hydrogen and Helium,
+ # developed by Douglas Scott (dscott@astro.ubc.ca)
+ # based on calculations in the papers Seager, Sasselov & Scott
+ # (ApJ, 523, L1, 1999; ApJS, 128, 407, 2000)
+ # and "fudge" updates in Wong, Moss & Scott (2008).
+ #
+ # Permission to use, copy, modify and distribute without fee or royalty at
+ # any tier, this software and its documentation, for any purpose and without
+ # fee or royalty is hereby granted, provided that you agree to comply with
+ # the following copyright notice and statements, including the disclaimer,
+ # and that the same appear on ALL copies of the software and documentation,
+ # including modifications that you make for internal use or for distribution:
+ #
+ # Copyright 1999-2010 by University of British Columbia.  All rights reserved.
+####################################################################################################################
+# This file contains a JAX-compatible version of the recfast code base, which has been adapted for use in the 
+# DISCO-EB module by Oliver Hahn. The DISCO-EB module is distributed under the GNU GPL license.
+####################################################################################################################
+ 
 import diffrax as drx
-import equinox as eqx
-import jax 
+import jax
 import jax.numpy as jnp
-from functools import partial 
+from jax_cosmo.scipy.integrate import romb
+from functools import partial
 from typing import Tuple
 
-from .cosmo import dadtau
-from .util import softclip
+from .ode_integrators_stiff import GRKT4
+# from diffrax import Tsit5
 
-from .ode_integrators_stiff import GRKT4, Rodas5Transformed
-from diffrax import Kvaerno5
-
-
-const_c2ok = 1.62581581e4 # K / eV
-const_c_Mpc_s = 9.71561189e-15 # Mpc/s
-
-const_G       = 6.67430e-11          # Gravitational Constant [N m^2/kg^2], PDG 2023
+# Pre-compute constants
+const_G = 6.67430e-11               # Gravitational constant [m^3/kg/s^2], PDG 2023
 const_mH      = 1.67353284e-27      # H atom mass [kg], PDG 2023
 const_me      = 9.1093837015e-31    # Electron mass [kg], PDG 2023
-const_mHe_mH  = 3.97146570884       # Helium / Hydrogen mass ratio, https://physics.nist.gov/cgi-bin/Compositions/stand_alone.pl
+const_mHe_mH  = 3.97146570884       # Helium / Hydrogen mass ratio
 const_c       = 2.99792458e+08      # Speed of light [m/s]     
 const_h       = 6.62607015e-34      # Planck's constant [Js], PDG 2023
 const_kB      = 1.380649e-23        # Boltzman's constant [J/K], PDG 2023
+const_sigma   = 6.6524587321e-29    # Thomson scattering cross section [m^2], PDG 2023
+const_arad = 4 * 5.670374419e-8 / const_c # Radiation constant [Ws/m^3/K^4], PDG 2023
 
-const_aRad    = 7.565914E-16        # Radiation constant W/m^4 K^4
-const_sigmaT  = 6.6524616E-29       # Thomson cross section [m^2], PDG 2023
+# bigH = 100.0e3/(1.0e6*3.0856775807e16)  # Ho in s-1
+bigH = 3.2407792902755102e-18       # Ho in s-1 
+const_dens_fac = 11.223810928601939 # 3 * bigH**2 / (8 * jnp.pi * const_G * const_mH)
 
-const_Lam2s1sH  = 8.2245809/const_c_Mpc_s         # H 2s-1s two photon rate in [s^-1] 
-const_Lam2s1sHe = 51.3 /const_c_Mpc_s             # HeI 2s-1s two photon rate in [s^-1]
-const_LyalphaH  = 1.215670e-07      # H Lyman alpha wavelength in [m]              
-const_LyalphaHe = 5.843344e-08      # HeI 2^1p - 1^1s wavelength in [m]                -> HeI 5.04259042e-8 from Drake (1993)
-const_EionH2s   = 3.944934227013e4  # H 2s ionization energy in [K] 
-const_EionHe2s  = 4.608856067179e4  # HeI 2s ionization energy in [K]  
+const_c2ok    = 1.62581581e4 # K / eV
+const_c_Mpc_s = 9.71561189e-15 # Mpc/s
+
+## COMMENTS FOR ALL CONSTANTS HAVE BEEN PRESERVED AS MUCH AS POSSIBLE AS THEY ARE IN THE ORIGINAL CODE
+
 const_EionHe12s = 6.314878282674e5  # HeII 1s ionization energy in [K] 
-const_E2s1sH    = 1.183515881558e5  # H 2s energy from the ground state [K] 
-const_E2s1sHe   = 2.392347612515e5  # HeI 2s energy from the ground state in [K]
-const_E2p2sHe   = 6.988756904317e3  # HeI 2p - 2s energy difference in  [K]
 
+# 2 photon rates and atomic levels
+Lambda = 8.2245809                  # H 2s-1s two photon rate
+Lambda_He = 51.3                    # HeI 2s-1s two photon rate
+L_H_ion = 1.096787737e7             # level for H ionization in m^-1
+L_H_alpha = 8.225916453e6           # level for H Ly alpha in m^-1
+L_He1_ion = 1.98310772e7            # level for HeI ionization in m^-1
+L_He2_ion = 4.389088863e7           # level for HeII ionization in m^-1
+L_He_2s = 1.66277434e7              # level for HeI 2s in m^-1
+L_He_2p = 1.71134891e7              # level for He 2p (21P1-11S0) in m^-1    
 
-const_Hfac = 1/(1.0e+06*3.0856775807e+13) # 1 km/s/Mpc in 1/s
+# Atomic data for HeI
+A2P_s = 1.798287e9                  # Einstein A coefficient for He 21P1-11S0
+A2P_t = 177.58                      # Einstein A coefficient for He 23P1-11S0  
+L_He_2Pt = 1.690871466e7            # level for 23P012-11S0 in m^-1
+L_He_2St = 1.5985597526e7           # level for 23S1-11S0 in m^-1
+L_He2St_ion = 3.8454693845e6        # level for 23S1-continuum in m^-1
+sigma_He_2Ps = 1.436289e-22         # H ionization x-section at HeI 21P1-11S0 freq. in m^2
+sigma_He_2Pt = 1.484872e-22         # H ionization x-section at HeI 23P1-11S0 freq. in m^2
 
-MAX_EXP = 60
+# Gaussian fits
+AGauss1 = -0.14                     # amplitude of the 1st Gaussian for the H fudging
+AGauss2 = 0.05                      # amplitude of the 2nd Gaussian for the H fudging
+zGauss1 = 7.28                      # ln(1+z) central value of the 1st Gaussian
+zGauss2 = 6.75                      # ln(1+z) central value of the 2nd Gaussian
+wGauss1 = 0.18                      # width of the 1st Gaussian
+wGauss2 = 0.33                      # width of the 2nd Gaussian
 
-@jax.custom_jvp
-def NHnow( a, YHe, H0, Omegab ):
-    mu_H = 1/(1-YHe) 
-    rho_c = 3 * (H0*const_Hfac)**2 / (8 * jnp.pi * const_G) 
-    return rho_c * Omegab / (const_mH * mu_H) / a**3
+H_frac = 1.e-3 
 
-@NHnow.defjvp
-def NHnow_jvp( primals, tangents ):
-    a, YHe, H0, Omegab = primals
-    da, dYHe, dH0, dOmegab = tangents
-    N = NHnow( a, YHe, H0, Omegab )
-    dN = N * ( -3 * da/a + dOmegab/Omegab + 2*dH0/H0 - dYHe/(1-YHe)  )
-    return N, dN
+Lalpha = 1.0/L_H_alpha                        # Ly alpha wavelength in SI units
+Lalpha_He = 1.0/L_He_2p                       # Helium I 2p-1s wavelength in SI units
+DeltaB = const_h*const_c*(L_H_ion-L_H_alpha)  # energy of first excited state from continuum = 3.4eV
+CDB = DeltaB/const_kB                         # CDB=DeltaB/k_B			Constants derived from B1,B2,R
+DeltaB_He = const_h*const_c*(L_He1_ion-L_He_2s)  # energy of first excited state from cont. for He = 3.4eV
+CDB_He = DeltaB_He/const_kB                   # CDB_He=DeltaB_He/k_B n=2-infinity for He in Kelvin
+CB1 = const_h*const_c*L_H_ion/const_kB        # CDB*4.			Lalpha and sigma_Th, calculated
+CB1_He1 = const_h*const_c*L_He1_ion/const_kB  # CB1 for HeI ionization potential
+CB1_He2 = const_h*const_c*L_He2_ion/const_kB  # CB1 for HeII ionization potential
 
-@jax.custom_jvp
-def SahaBoltzmann_( gi, gc, E_ion, T ):
-    rescale = 1.0e-16 #1e-9
-    # c1 = (const_h/(2*jnp.pi*const_me)) * (const_h/const_kB) #/ 1e-13**(2/3)
-    c1 = 2.578838606475204e-06 * (1e-13/rescale)**(2/3)
-    betaE = jnp.minimum(jnp.maximum(E_ion/T,-MAX_EXP),MAX_EXP)
-    return gi/(2*gc) * (c1/T)**1.5 * jnp.exp(betaE)
+CR = 2.0*jnp.pi*(const_me/const_h)*(const_kB/const_h) 
+CK = Lalpha**3/(8.0*jnp.pi)         
+CK_He = Lalpha_He**3/(8.0*jnp.pi) 
+CL = const_c*const_h/(const_kB*Lalpha) 
+CL_He = const_c*const_h/(const_kB/L_He_2s)
+CT = (8.0/3.0)*(const_sigma/(const_me*const_c))*const_arad  
+Bfact = const_h*const_c*(L_He_2p-L_He_2s)/const_kB  
+CL_PSt = const_h*const_c*(L_He_2Pt - L_He_2St)/const_kB
+const_h_c_L_He_2St_kB = const_h*const_c*L_He_2St/(const_kB)
 
-@SahaBoltzmann_.defjvp
-def SahaBoltzmann_jvp( primals, tangents ):
-    gi, gc, E_ion, T = primals
-    dgi, dgc, dE_ion, dT = tangents
-    S = SahaBoltzmann_( gi, gc, E_ion, T )
-    dS = S * (1/gi * dgi - 1/gc * dgc + 1/T * dE_ion - (1.5 + E_ion/T)/T * dT)
-    return S, dS
+# Pequignot, Petitjean & Boisson fitting parameter for Hydrogen
+a_PPB = 4.309
+b_PPB = -0.6166
+c_PPB = 0.6703
+d_PPB = 0.5300
 
-def SahaBoltzmann( *, gi, gc, E_ion, T ):
-    return SahaBoltzmann_( gi, gc, E_ion, T )
+# Verner and Ferland type fitting parameter for Helium
+a_VF = 10.**(-16.744)
+b_VF = 0.711
+T_0 = 10**(0.477121)
+T_1 = 10**(5.114)
 
-@jax.custom_jvp
-def fBoltzmann_( gj, gi, E, T ):
-    betaE = jnp.minimum(jnp.maximum(E/T,-MAX_EXP),MAX_EXP)
-    return gj/gi * jnp.exp(-betaE)
+# HeI triplet recombination rate fitting parameters
+a_trip = 10.**(-16.306)
+b_trip = 0.761
+  
+def ionization(a, y, params):
+  param = params[0]
+  z = 1/a - 1
+  # Pre-compute derived constants
+  H = param['H0']/100.0
+  HO = H*bigH
+  fu = 1.105
+  mu_H = 1.0/(1.0-param['YHe'])
+  # mu_T = const_mHe_mH/(const_mHe_mH-(const_mHe_mH-1.0)*param['YHe'])
+  fHe = param['YHe']/(const_mHe_mH*(1.0-param['YHe']))
+  Nnow = const_dens_fac * H * H * param['Omegab'] / mu_H
 
-@fBoltzmann_.defjvp
-def fBoltzmann_jvp( primals, tangents ):
-    """
-    Compute (forward-mode) Jacobian-vector product of fBoltzmann
-    """
-    gj, gi, E, T = primals
-    dgj, dgi, dE, dT = tangents
-    fB = fBoltzmann_( gj, gi, E, T )
-    dfB = fB * ( dgj/gj - dgi/gi - dE / T + E / T**2 * dT )
-    return fB, dfB
+  x_H = y[0]
+  x_He = y[1]
+  x = x_H + fHe * x_He
+  Tmat = jnp.abs(y[2])
 
-def fBoltzmann( *, gj, gi, E, T ):
-    """ 
-    Boltzmann factor for transition from level j to level i
-    """
-    return fBoltzmann_( gj, gi, E, T )
+  # Calculate common terms once
+  n = Nnow * (1 + z)**3
+  n_He = fHe * n
+  Trad = param['Tcmb'] * (1 + z)
+  z_term = (1 + z)
+
+  # Hubble parameter calculation
+  # Hprime = a'/a, dtau = dt/a -> da/dtau/a = da/dt = Ha
+  from .background import get_aprimeoa
+  Hz = (1e-5*get_aprimeoa(param=param, aexp=a)) / a * const_c * bigH
+  
+  # Temperature and rate calculations
+  Tmat_1e4 = Tmat / 1e4
+  CR_Tmat_15 = (CR * Tmat)**1.5
+  
+  # Get the radiative rates
+  Rdown = 1e-19 * a_PPB * Tmat_1e4**b_PPB / (1 + c_PPB * Tmat_1e4**d_PPB)
+  Rup = Rdown * CR_Tmat_15 * jnp.exp(-CDB / Tmat)
+
+  # Calculate He rates using a fit
+  sq_0 = jnp.sqrt(Tmat / T_0)
+  sq_1 = jnp.sqrt(Tmat / T_1)
+  
+  sq_0_term = 1 + sq_0
+  sq_1_term = 1 + sq_1
+  
+  Rdown_He_common = a_VF / (sq_0 * sq_0_term**(1 - b_VF) * sq_1_term**(1 + b_VF))
+  Rdown_He = Rdown_He_common
+  Rup_He = 4 * Rdown_He * CR_Tmat_15 * jnp.exp(-CDB_He / Tmat)
+
+  # Calculate Boltzmann factor with numerical stability
+  He_Boltz = jnp.exp(jnp.minimum(680.0, Bfact / Tmat))
+
+  # HeI calculations
+  Rdown_trip = a_trip / (sq_0 * sq_0_term**(1 - b_trip) * sq_1_term**(1 + b_trip))
+  Rup_trip = Rdown_trip * jnp.exp(-const_h*const_c*L_He2St_ion/(const_kB*Tmat)) * CR_Tmat_15 * (4/3)
+  
+  # Peebles coefficient calculation
+  K_gaussian = 1 + AGauss1*jnp.exp(-((jnp.log(z_term)-zGauss1)/wGauss1)**2) + AGauss2*jnp.exp(-((jnp.log(z_term)-zGauss2)/wGauss2)**2)
+  K = CK / Hz * K_gaussian
+  
+  # He calculations
+  one_minus_x_He = 1 - x_He
+  one_minus_x_H = 1 - x_H
+  n_He_1_minus_x_He = n_He * one_minus_x_He
+  
+  tauHe_s = A2P_s * CK_He * 3 * n_He_1_minus_x_He / Hz
+  pHe_s = (1 - jnp.exp(-tauHe_s)) / tauHe_s
+  
+  # Doppler calculation
+  Doppler_term = jnp.sqrt(2 * const_kB * Tmat / (const_mH * const_mHe_mH * const_c**2))
+  Doppler_2p = const_c * L_He_2p * Doppler_term
+  Doppler_2Pt = const_c * L_He_2Pt * Doppler_term
+  
+  # Gamma calculations
+  gamma_2Ps_term = 3 * A2P_s * fHe * one_minus_x_He * const_c**2
+  gamma_2Ps_denom = jnp.sqrt(jnp.pi) * sigma_He_2Ps * 8 * jnp.pi * Doppler_2p * one_minus_x_H * (const_c * L_He_2p)**2
+  gamma_2Ps = gamma_2Ps_term / gamma_2Ps_denom
+  
+  # AHcon calculation for H continuum opacity
+  pb = 0.36  # value from KIV (2007)
+  qb = 0.86  # He fudge factor
+  AHcon = A2P_s / (1 + pb * (gamma_2Ps**qb))
+  
+  # K_He calculation with numerical stability
+  K_He_cond1 = jnp.logical_or(x_He < 5e-9, x_He > 0.98)
+  K_He_cond2 = x_H < 0.9999999
+  
+  K_He_default = CK_He / Hz
+  K_He_case1 = 1.0 / ((A2P_s * pHe_s + AHcon) * 3.0 * n_He_1_minus_x_He)
+  K_He_case2 = 1.0 / (A2P_s * pHe_s * 3.0 * n_He_1_minus_x_He)
+  
+  K_He = jnp.where(K_He_cond1, K_He_default, 
+           jnp.where(K_He_cond2, K_He_case1, K_He_case2))
+  
+  # Triplet calculations
+  tauHe_t = A2P_t * n_He_1_minus_x_He * 3 / (8 * jnp.pi * Hz * L_He_2Pt**3)
+  pHe_t = (1 - jnp.exp(-tauHe_t)) / tauHe_t
+  
+  gamma_2Pt_term = 3 * A2P_t * fHe * one_minus_x_He * const_c**2
+  gamma_2Pt_denom = jnp.sqrt(jnp.pi) * sigma_He_2Pt * 8 * jnp.pi * Doppler_2Pt * one_minus_x_H * (const_c * L_He_2Pt)**2
+  gamma_2Pt = gamma_2Pt_term / gamma_2Pt_denom
+  
+  # KIV (2007) parameters
+  pb_t = 0.66
+  qb_t = 0.9
+  AHcon_t = A2P_t / (1 + pb_t * gamma_2Pt**qb_t) / 3
+  
+  # CfHe_t calculation
+  exp_CL_PSt = jnp.exp(-CL_PSt / Tmat)
+  CfHe_t_case1 = A2P_t * pHe_t * exp_CL_PSt
+  CfHe_t_case2 = (A2P_t * pHe_t + AHcon_t) * exp_CL_PSt
+  CfHe_t = jnp.where(x_H > 0.99999, CfHe_t_case1, CfHe_t_case2)
+  CfHe_t /= (Rup_trip + CfHe_t)  # "C" factor for triplets
+  
+  # Time calculations
+  timeTh = (1 / (CT * Trad**4)) * (1 + x + fHe) / x
+  timeH = 2 / (3 * HO * z_term**1.5)
+  
+  # f0 calculation
+  Hz_z_term = Hz * z_term
+  x_x_H_n_Rdown = x * x_H * n * Rdown
+  Rup_1_minus_x_H_exp_CL = Rup * one_minus_x_H * jnp.exp(-CL / Tmat)
+  rate_diff = x_x_H_n_Rdown - Rup_1_minus_x_H_exp_CL
+  
+  K_Lambda_n_1_minus_x_H = K * Lambda * n * one_minus_x_H
+  denom_term = 1 / fu + K_Lambda_n_1_minus_x_H / fu + K * Rup * n * one_minus_x_H
+  
+  f0_case1 = 0.0
+  f0_case2 = rate_diff / Hz_z_term
+  f0_case3 = (rate_diff * (1 + K_Lambda_n_1_minus_x_H)) / (Hz_z_term * denom_term)
+  
+  f0 = jnp.where(x_H > 0.99, f0_case1,
+          jnp.where(x_H > 0.985, f0_case2, f0_case3))
+  
+  # f1 calculation
+  x_x_He_n_Rdown_He = x * x_He * n * Rdown_He
+  Rup_He_1_minus_x_He_exp_CL_He = Rup_He * one_minus_x_He * jnp.exp(-CL_He / Tmat)
+  rate_diff_He = x_x_He_n_Rdown_He - Rup_He_1_minus_x_He_exp_CL_He
+  
+  K_He_Lambda_He_n_He_1_minus_x_He_He_Boltz = K_He * Lambda_He * n_He_1_minus_x_He * He_Boltz
+  He_denom_term = 1 + K_He * (Lambda_He + Rup_He) * n_He_1_minus_x_He * He_Boltz
+  
+  f1_main = (rate_diff_He * (1 + K_He_Lambda_He_n_He_1_minus_x_He_He_Boltz)) / (Hz_z_term * He_denom_term)
+  
+  # Triplet contribution
+  trip_rate_diff = x * x_He * n * Rdown_trip - one_minus_x_He * 3 * Rup_trip * jnp.exp(-const_h_c_L_He_2St_kB / Tmat)
+  trip_contrib = trip_rate_diff * CfHe_t / Hz_z_term
+  trip_cond = jnp.logical_or(x_He < 5e-9, x_He > 0.98)
+  
+  f1 = jnp.where(x_He < 1e-8, 0.0, 
+          f1_main + jnp.where(trip_cond, 0.0, trip_contrib))
+  
+  # f2 calculation
+  epsilon = Hz * (1 + x + fHe) / (CT * Trad**3 * x)
+  f2_case1 = Tmat / z_term
+  f2_case2 = CT * (Trad**4) * x / (1 + x + fHe) * (Tmat - Trad) / Hz_z_term + 2 * Tmat / z_term
+  f2 = jnp.where(timeTh < H_frac * timeH, f2_case1, f2_case2)
+  
+  dzda = -1/a**2
+  return jnp.array([f0, f1, f2]) * dzda
+
+def solve_ionization( *, astart : float, aend : float, ystart : jnp.ndarray, rtol : float = 1e-6, atol : float = 1e-8, max_steps : int = 128, param : dict ) -> jnp.ndarray:
+  sol =drx.diffeqsolve(
+        terms=drx.ODETerm(ionization),
+        solver=GRKT4(),
+        t0=astart,
+        t1=aend,
+        dt0=jnp.abs(astart*1e-3),
+        y0=ystart[:3],
+        stepsize_controller = drx.PIDController(rtol=rtol,atol=atol), 
+        max_steps=max_steps,
+        args=(param,),
+        # adjoint=drx.RecursiveCheckpointAdjoint(),
+        adjoint=drx.ForwardMode(),
+        # adjoint=drx.ImplicitAdjoint(),
+        throw=False,
+    )
+  dyda = ionization( aend, sol.ys[-1,:], (param,) )
+  return jnp.append(sol.ys[-1,:], dyda)
 
 def Saha_HeII( a, param ):
     """
     Saha equation for HeII recombination
     """
+    def NHnow( a, YHe, H0, Omegab ):
+      const_Hfac = 1/(1.0e+06*3.0856775807e+13) # 1 km/s/Mpc in 1/s
+      mu_H = 1/(1-YHe) 
+      rho_c = 3 * (H0*const_Hfac)**2 / (8 * jnp.pi * const_G) 
+      return rho_c * Omegab / (const_mH * mu_H) / a**3
     T = param['Tcmb'] / a
     betaE = const_EionHe12s / T
-    fHe = param['YHe']/(const_mHe_mH*(1.0-param['YHe']))
-    A = 1 + fHe
-    B = 1 + 2*fHe
+    A = 1 + param['fHe']
+    B = 1 + 2*param['fHe']
     R = (2*jnp.pi* const_me * const_kB / const_h**2 * T )**1.5 / NHnow( a, param['YHe'], param['H0'], param['Omegab'] ) * jnp.exp( - betaE )
 
     xe = jax.lax.cond( R>1e5, 
-                      lambda x: fHe * (1 - B/R + (1 + 5*fHe + 6*fHe**2)/R**2), # asymptotic expansion to prevent truncation errors
+                      lambda x: param['fHe'] * (1 - B/R + (1 + 5*param['fHe'] + 6*param['fHe']**2)/R**2), # asymptotic expansion to prevent truncation errors
                       lambda x:  -(R-A)/2 + jnp.sqrt( (R-A)**2/4 + R*B ) - A, None )
     
     return xe
 
 
-
-def model_recfast( *, logtau : float, yin : jnp.ndarray, param : dict, noiseless_dT : bool = False ) -> jnp.ndarray:
+def _get_adaptive_sampling(a0: float, a1: float, N: int) -> jax.Array:
   """
-    Recombination model from RECFAST (Seager et al. 1999), minor changes from original implementation
+  Generate adaptive sampling in scale factor with concentration around recombination.
+
+  Distributes points to concentrate sampling where ionization fraction changes rapidly:
+  - 5% very early times (z > 3000)
+  - 10% pre-recombination (1400 < z < 3000)
+  - 50% recombination era (600 < z < 1400) - where xe changes most
+  - 35% post-recombination (z < 600)
+
+  This improves accuracy of spline interpolation without increasing total points.
   """
-  rescale = 1.0e-16
-  
-  tau  = jnp.exp(logtau)
-  a    = jnp.exp(yin[0])
-  xHep = yin[1]
-  xp   = yin[2]
-  xe   = xHep + xp
-  # TM   = jnp.clip(yin[3], 1e-8, 1.1*param['Tcmb']) / a    # y[3]=a*T since it is O(1) and does not evolve by orders of magnitude
-  TM   = yin[3] / a
-  TR   = param['Tcmb'] / a
+  # Allocate points adaptively
+  n_very_early = max(8, int(N * 0.05))    # At least 8 points, ~5%
+  n_pre_recomb = max(8, int(N * 0.10))    # ~10%
+  n_recomb = int(N * 0.50)                 # 50% - concentrate here!
+  n_post = N - n_very_early - n_pre_recomb - n_recomb  # ~35%
 
-  fHe = param['YHe'] / (const_mHe_mH*(1-param['YHe']))
-  
-  Hz = dadtau( a=a, param=param ) / a**2  # is in units of 1/Mpc
+  # Redshift breakpoints
+  z_break1 = 3000  # Very early
+  z_break2 = 1400  # Start of recombination
+  z_break3 = 600   # End of recombination
 
-  nHtot = NHnow( a, param['YHe'], param['H0'], param['Omegab'] ) * rescale
+  a_break1 = 1.0 / (1.0 + z_break1)
+  a_break2 = 1.0 / (1.0 + z_break2)
+  a_break3 = 1.0 / (1.0 + z_break3)
 
-  ε = 1e-4
-  nH1  = jax.lax.cond( xp > 1-ε, lambda x: 0.0, lambda x: (1-xp) * nHtot, None )
-  nHe1 = jax.lax.cond( xHep > (1-ε)*fHe, lambda x: 0.0, lambda x: (fHe - xHep) * nHtot, None )
+  # Ensure breakpoints are within bounds
+  a_break1 = jnp.maximum(a_break1, a0)
 
-  #  Calculate the Saha and Boltzmann equilibrium relations
-  SHe = SahaBoltzmann( gi=1, gc=2, E_ion=const_EionHe2s, T=TM )
-  fBHe = fBoltzmann( gj=1, gi=1, E=const_E2s1sHe, T=TM )
-  
-  SH = SahaBoltzmann( gi=2, gc=1, E_ion=const_EionH2s, T=TM)
-  fBH = fBoltzmann( gj=1, gi=1, E=const_E2s1sH, T=TM)
-  
-  # For HeI, the energy levels of 2s and 2p are quite different.
-  # Therefore the ratio b should be a boltzmann factor, and this
-  # will also have to be incorporated into the derivatives wrt TM
+  # Create segments with geometric spacing
+  a1_seg = jnp.geomspace(a0, a_break1, n_very_early, endpoint=False)
+  a2_seg = jnp.geomspace(a_break1, a_break2, n_pre_recomb, endpoint=False)
+  a3_seg = jnp.geomspace(a_break2, a_break3, n_recomb, endpoint=False)
+  a4_seg = jnp.geomspace(a_break3, a1, n_post)
 
-  fBHe2p2s = fBoltzmann( gj=3, gi=1, E=const_E2p2sHe, T=TM)
-  
-  # H recombination coefficient alphaBH and
-  # photoionization coefficient betaH. 
-  a1 =4.309 / const_c_Mpc_s * (1e-13/rescale); a2 = -0.6166; a3 = 0.6703; a4 = 0.5300
-  T4 = TM/1.0e+04
-  alphaH = a1 * T4**a2 / (1.0 + a3 * T4**a4) * 1.0e-06 
+  return jnp.concatenate([a1_seg, a2_seg, a3_seg, a4_seg])
 
-  # Multiply alpha by the fudge factor input.F. This step is what makes
-  # this simple ode method approximate the full multi-level calculation
-  # for H. Note that because beta is derived from alpha, it is also affected
-  # by F.   
-  # fudge_F = 1.14
-  fudge_F = 1.125 # use fudged updated fudge factor from newer recfast 
-  
-  alphaH *= fudge_F
-  betaH = ((alphaH*rescale)/SH)/rescale  # rescale is used to prevent underflow in single precision
+def compute_thermal_history( *, a0 : float, a1 : float, N : int, rtol : float = 1e-3, atol : float = 1e-6, param : dict ) -> Tuple[jnp.ndarray, jnp.ndarray]:
+  """
+  Compute the thermal history of the Universe from a0 to a1 in N steps
 
-  # He case B recombination and photoionization coefficient 
-  # No need to multiply a fudge factor.     
-  # a1 = 1.691e-12; a2 = 1.519; T0=3.0; T1=3.2026e+04
-  a1 = 16.91 / const_c_Mpc_s * (1e-13/rescale); a2 = 1.519; T0=3.0; T1=3.2026e+04
- 
-  alphaHe = jnp.sqrt(TM/T0)*(1+jnp.sqrt(TM/T0))**(1-a2) \
-    * (1.0+jnp.sqrt(TM/T1))**(1+a2)
-  alphaHe = a1 / alphaHe / 1.0e+06 
-  betaHe = ((alphaHe*rescale) / SHe)/rescale # rescale is used to prevent underflow in single precision
-  
-  # Cosmological redshifting 
-  rescale13 = rescale**(1/3)
-  KHe = (const_LyalphaHe/rescale13)**3 / (Hz * 8 * jnp.pi)  # use Peebles coeff. for He # TODO: change units of const_LyalphaHe
-  KH =  (const_LyalphaH/rescale13)**3 / (Hz * 8 * jnp.pi)   # use Peebles coeff. for H # TODO: change units of const_LyalphaH
+  Args:
+      a0 (float): initial scale factor
+      a1 (float): final scale factor
+      N (int): number of steps
+      rtol (float, optional): relative tolerance. Defaults to 1e-3.
+      atol (float, optional): absolute tolerance. Defaults to 1e-6.
+      param (dict): dictionary of cosmological parameters
 
-  # Inhibition factors
-  fCHe = (1 + KHe*const_Lam2s1sHe * nHe1 * fBHe2p2s) \
-    / (1 + KHe * (const_Lam2s1sHe + betaHe) * nHe1 * fBHe2p2s)
-  fCH = (1 + KH*const_Lam2s1sH * nH1) / (1 + KH * (const_Lam2s1sH + betaH) * nH1)
+  Returns:
+      Tuple[jnp.ndarray, jnp.ndarray]: [xeHI, xeHeII, Tm, dxHIda, dxHeIda, dTmda], scale factor
+  """
 
-  
-  # Finally calculate the rate equations.
-  #   0 = a, 1 = He, 2 = H,  3 = TM
-  dlogadtau = a * Hz
-  arescale = rescale
+  # Use adaptive sampling that concentrates points around recombination
+  a = _get_adaptive_sampling(a0, a1, N+1)
+  y_init= jnp.zeros((6, N))
 
-  ε = 1e-4
-  dxHepdtau = jax.lax.cond( jnp.fabs(xHep) > ε, 
-              lambda x: a  * (-alphaHe*xe*nHtot + betaHe*(fHe/xHep-1.0)*fBHe)*xHep*fCHe, 
-              lambda x: a  * (-(alphaHe*arescale)*xe*xHep*(nHtot/arescale) + (betaHe*arescale)*(fHe-xHep)*(fBHe/arescale))*fCHe, None )
-              
-  dxpdtau   = a * fCH  * jax.lax.cond( jnp.fabs(xp) > ε, 
-                                lambda x: (-alphaH*xe*nHtot + betaH*fBH*(1.0/xp-1.0))*xp,
-                                lambda x: (-(alphaH*arescale)*(nHtot/arescale)*xe + betaH*fBH*(xp-1.0))*xp, None )
-  
-  # limit compton term to avoid numerical problems
-  # Comp = 8/3 * const_sigmaT * const_aRad / const_me / const_c * TR**4 
-  Comp = (4.707988984123603e-06 * TR)**4 / const_c_Mpc_s
+  H = param['H0']/100.0
+  HO = H*bigH
+  mu_H = 1.0/(1.0-param['YHe'])
+  Nnow = 3.0 * HO * HO * param['Omegab'] / (8.0 * jnp.pi * const_G * mu_H * const_mH)
+  fHe = param['YHe']/(const_mHe_mH*(1.0-param['YHe']))
+  Tcmb = param['Tcmb']
+  Tcmb2 = Tcmb**2
+  Tcmb3 = Tcmb2*Tcmb
 
-  # fHe = param['YHe'] / (const_mHe_mH*(1-param['YHe']))
-  compton_term = Comp * xe/(1 + xe + fHe)
-  daTdtau      = a**2 * (compton_term * (TR - TM) - Hz * TM )
+  def loop_body(i, y_arr):
+    astart = a[i]
+    zstart = 1.0/astart - 1.0
+    aend   = a[i+1]
+    zend   = 1.0/aend - 1.0
+    dzda   = -1.0/aend**2
+    y_prev = jnp.where(i > 0, y_arr[:, i-1], jnp.array([1.0, 1.0, param['Tcmb']*(1.0 + zstart), 0.0, 0.0, -param['Tcmb']*(1.0 + zstart)]))
 
-  # if called in noiseless mode, set the derivative to zero if the temperature is not evolving
-  # otherwise the right hand side of the ODE can be noisy on the solution as the system is very stiff
-  ε = 1e-5
-  daTdtau = jax.lax.cond( noiseless_dT & (jnp.abs(a*TR-a*TM)<ε), lambda x: 0.0, lambda x: daTdtau, None )
+    cond1 = (zend > 3500.0)
+    cond2 = jnp.logical_and(i > 0, y_prev[1] > 0.99)
+    cond3 = jnp.logical_and(i > 0, y_prev[0] > 0.99)
 
-  dy = jnp.array([ dlogadtau, dxHepdtau, dxpdtau, daTdtau ]) * tau
-  return dy
+    def f_case1(): # if zend > 3500.0:
+      return jnp.array([1.0, 1.0, param['Tcmb']*(1.0 + zend), 0.0, 0.0, -param['Tcmb']*(1.0 + zend)])
+    
+    def f_case2(): # elif i>0 and x_He0 > 0.99:
+      x_H0 = 1.0
+      rhs  = (jnp.exp(1.5 * jnp.log(CR * param['Tcmb']/(1.0+zend))
+          - CB1_He1/(param['Tcmb']*(1.0+zend))) / Nnow) * 4.0
+      x_He0 = 0.5*(jnp.sqrt((rhs-1.0)**2 + 4.0*(1.0+fHe)*rhs) - (rhs-1.0))
+      dxHeIdz =((-3*(-(CB1_He1/Tcmb) + CR*Tcmb)**1.5*(Nnow + 2*fHe*Nnow + 
+              4*(-((CB1_He1 - CR*Tcmb**2)/(Tcmb*(1+zend))))**1.5 - 
+              jnp.sqrt(Nnow**2 + (16*(-CB1_He1 + CR*Tcmb**2)**3)/(Tcmb3*(1 + zend)**3) + 
+                8*(1 + 2*fHe)*Nnow*(-((CB1_He1 - CR*Tcmb**2)/(Tcmb*(1+zend))))**1.5)))
+           /(Nnow*(1 + zend)**2.5*jnp.sqrt(Nnow**2 + (16*(-CB1_He1 + CR*Tcmb**2)**3)/
+               (Tcmb**3*(1 + zend)**3) + 8*(1 + 2*fHe)*Nnow*(-((CB1_He1 - CR*Tcmb**2)/(Tcmb + Tcmb*zend)))**1.5)))
+      return jnp.array([x_H0, (x_He0 - 1.0)/fHe, param['Tcmb']*(1.0+zend), 0.0, dxHeIdz*dzda, -param['Tcmb']*(1.0+zend)])
+    
+    def f_case3(): # elif i>0 and x_H > 0.99:
+      rhs   = jnp.exp(1.5*jnp.log(CR*param['Tcmb']/(1.0+zend))
+          - CB1/(param['Tcmb']*(1.0+zend))) / Nnow
+      x_H0  = 0.5*(jnp.sqrt(rhs**2 + 4.0*rhs) - rhs)
+      dxHdz = ((3*((2*(-((CB1 - CR*Tcmb**2)/(Tcmb*(1+zend))))**1.5)/(1 + zend) + 
+                   ((CB1 - CR*Tcmb**2)*(2*CB1**2 - 4*CB1*CR*Tcmb**2 + Tcmb**2*
+                 (2*CR**2*Tcmb**2 + Nnow*(1 + zend)**2*jnp.sqrt(-((CB1 - CR*Tcmb**2)/(Tcmb*(1+zend)))))))/
+            (Tcmb**1.5*(1 + zend)**2.5*jnp.sqrt((-CB1 + CR*Tcmb**2)*
+                (CB1**2 - 2*CB1*CR*Tcmb**2 + Tcmb**2*(CR**2*Tcmb**2 + Nnow*(1 + zend)**2*
+                                                      jnp.sqrt(-((CB1 - CR*Tcmb**2)/(Tcmb*(1+zend))))))))))/(2.*Nnow))
 
-class VectorField(eqx.Module):
-    model: eqx.Module
 
-    def __call__(self, logtau, y, args):
-        return self.model(logtau, y, args)   
+      y_sol = solve_ionization(astart=astart, aend=aend, ystart=y_prev, rtol=rtol, atol=atol, max_steps=128, param=param)
+      y_sol = y_sol.at[0].set(x_H0)
+      y_sol = y_sol.at[3].set(dxHdz*dzda)
+      return y_sol
+    
+    def f_case4(): # else:
+      return solve_ionization(astart=astart, aend=aend, ystart=y_prev, rtol=rtol, atol=atol, max_steps=128, param=param)
 
-# @partial(jax.jit, backend='cpu')
-# @jax.jit
-def compute_thermo( *, param : dict ) -> tuple[drx.Solution, dict]:
-
-    model = drx.ODETerm(VectorField(
-        lambda logtau, y , params : model_recfast( logtau=logtau, yin=y, param=params[0])
-    ))
-
-    t0 = jnp.log(param['taumin'])
-    t1 = jnp.log(param['taumax'])
-
-    y0 = jnp.array( [ jnp.log(param['amin']), param['YHe']/(const_mHe_mH*(1.0-param['YHe'])), 1.0, param['Tcmb'] ] )
-
-    param['fHe'] = param['YHe']/(const_mHe_mH*(1.0-param['YHe']))
-
-    saveat = drx.SaveAt( t0=False, t1=True, ts=jnp.linspace(0,jnp.log(1000),256,endpoint=False), steps=True, dense=True )
-
-    sol =drx.diffeqsolve(
-        terms=model,
-        solver=Rodas5Transformed( ), 
-        t0=t0,
-        t1=t1,
-        dt0=jnp.abs(t0*1e-2),
-        y0=y0,
-        saveat=saveat,  
-        stepsize_controller = drx.PIDController(rtol=1e-8,atol=1e-10), 
-        max_steps=2048,
-        args=(param, ),
-        # adjoint=drx.RecursiveCheckpointAdjoint(),
-        adjoint=drx.DirectAdjoint(),
-        # adjoint=drx.ImplicitAdjoint(),
+    new_val = jax.lax.cond(
+      cond1,
+      f_case1,
+      lambda: jax.lax.cond(
+        cond2,
+        f_case2,
+        lambda: jax.lax.cond(cond3, f_case3, f_case4)
+      )
     )
-    return sol, param
+
+    return y_arr.at[:, i].set(new_val)
+
+  y_final = jax.lax.fori_loop(0, N, loop_body, y_init)
+  return y_final, a[1:]
 
 
 @partial(jax.jit, static_argnames=("num_thermo",))
 def evaluate_thermo( *, param : dict, num_thermo = 2048 ) -> jax.Array:
+    
+    param['fHe'] = param['YHe']/(const_mHe_mH*(1.0-param['YHe']))
+    
+    y, a = compute_thermal_history( a0=param['amin'], a1=param['amax'], N=num_thermo, param=param )
 
-    sol    = param['sol']
-
-    # convert unused output array entries to NaNs (which are ignored by the interpolation)
-    invalid = sol.ts == jnp.inf
-    logtau = jnp.where( invalid, jnp.nan, sol.ts )
-    y = jnp.zeros_like(sol.ys)
-    for i in range(4):
-      y = y.at[:,i].set(jnp.where( invalid, jnp.nan, sol.ys[:,i] ))
-
-    # collect output 
-    tau       = jnp.exp(logtau)
-    dydtau    = jax.vmap( lambda logtau_, y_: model_recfast( logtau=logtau_, yin=y_, param=param, noiseless_dT=True ) )( logtau, y )
-    a         = jnp.exp(y[:,0])
-
+    # extract the relevant quantities from the solution
+    xeHI      = y[0,:]
+    xeHeI     = y[1,:]
     xeHeII    = jax.vmap( lambda a_: Saha_HeII( a_, param) )( a )
-    xeHeI     = y[:,1]
-    xeHI      = y[:,2]
-    xe        = xeHI + xeHeI + xeHeII
-    Tm        = y[:,3]/a
-    daTmdtau  = dydtau[:,3] / tau
-    daTmda    = daTmdtau / dadtau(a=a, param=param) 
+    xe        = xeHI + param['fHe'] * xeHeI + xeHeII
     mu        = 1/(1 + (1/const_mHe_mH-1) * param['YHe'] + (1-param['YHe']) * xe)
+    Tm        = y[2,:]
 
-    # mu        = 1/(1 - 0.75 * param['YHe'] + (1 - param['YHe']) * xe)
-    cs2       = const_kB/ const_mH / const_c**2 / mu * Tm * (4 - daTmda / (Tm)) /3
-    cs2       = cs2.at[0].set( const_kB/ const_mH / const_c**2 / mu[0] * Tm[0] * 4/3 )
+    # extract the derivatives that were also computed, which allows to compute cs2 and dxedtau
+    dxeHIda  = y[3,:]
+    dxeHeIda = y[4,:]
+    dxHeIIda = jax.vmap( lambda a_: jax.grad( lambda aa_: Saha_HeII( aa_, param) )( a_ ) )( a )
+    dTmda    = y[5,:]
+    daTmda   = Tm + a * dTmda
+    cs2      = const_kB/ const_mH / const_c**2 / mu * Tm * (4 - daTmda / (Tm)) /3
+    from .background import dadtau, dtauda_
+    dxedtau  = (dxeHIda + param['fHe'] * dxeHeIda + dxHeIIda) * dadtau(a=a, param=param)
 
-    return tau, a, cs2, Tm, mu, xe, xeHI, xeHeI, xeHeII, 
+    # compute conformal times tau for all entries in a
+    def step(cum_tau, a_pair):
+        a_low, a_high = a_pair
+        # Integrate dtauda_ between a_low and a_high using romb
+        dtau = romb(lambda a: dtauda_(a, param['grhom'], param['grhog'], param['grhor'],
+                        param['Omegam'], param['OmegaDE'],
+                        param['w_DE_0'], param['w_DE_a'],
+                        param['Omegak'], param['Neff'], param['Nmnu'],
+                        param['logrhonu_of_loga_spline']),
+            a_low, a_high)
+        new_tau = cum_tau + dtau
+        return new_tau, new_tau
+
+    # Stack adjacent pairs of aexp for integration over each interval
+    segments = jnp.stack([a[:-1], a[1:]], axis=1)
+    tau0 = param['taumin']
+    # Use scan to perform the cumulative integration
+    tau_segments = jax.lax.scan(step, tau0, segments)[1]
+    # Prepend the initial tau (0.0) to obtain the tau array corresponding to aexp
+    tau = jnp.concatenate([jnp.array([tau0]), tau_segments], axis=0)
+
+    return param, tau, a, cs2, Tm, mu, xe, xeHI, xeHeI, xeHeII, dxedtau
