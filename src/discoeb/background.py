@@ -306,9 +306,6 @@ def evolve_background( *, param, thermo_module = 'RECFAST', num_thermo: int = 25
 
     # compute optical depth and visibility functions
     akthom = 2.3038921003709498e-9 * (1.0 - param['YHe']) * param['Omegab'] * param['H0']**2
-    # grho_v = jax.vmap( lambda a: grho( param, a ) )( a )(aexp)
-    # aprimeoa = jnp.sqrt( grho_v / 3.0 )
-    aprimeoa = get_aprimeoa( param=param, aexp=aexp )
 
     tau_pre_recomb = param['tau_of_a_spline'].evaluate( 1e-4 )
     xe_full   = 1 + param['YHe'] / (1 - param['YHe'])
@@ -318,18 +315,14 @@ def evolve_background( *, param, thermo_module = 'RECFAST', num_thermo: int = 25
     # xe = param['xe_of_tau_spline'].evaluate( tau )
     # xeprime = param['xe_of_tau_spline'].derivative( tau )
     # xepprime  = param['xe_of_tau_spline'].derivative2( tau )
-    opac      = xe * akthom / aexp**2
-
+    opac       = xe * akthom / aexp**2
     opacspline = spline_interpolation( tau, opac, integrate_from_start=False)
-    opacprime  = opacspline.derivative( tau )
-    opacpprime = opacspline.derivative2( tau )
-    # opacprime = xeprime * akthom / aexp**2 - 2 * xe * akthom / aexp**2 * aprimeoa
+    opacprime, opacpprime = opacspline.derivative12( tau )
 
     optical_depth = opacspline.integral( tau )
     optical_depth_today = opacspline.integral( param['tau_of_a_spline'].evaluate( 1.0 ) )
     optical_depth -= optical_depth_today
 
-    # optical_depth = jnp.array([optical_depth[0], *optical_depth])
     expmmu    = jnp.exp(-optical_depth)
     vis       = opac * expmmu
     dvis      = (opacprime + opac**2) * expmmu

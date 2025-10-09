@@ -284,7 +284,6 @@ def solve_ionization( *, astart : float, aend : float, ystart : jnp.ndarray, rto
   sol =drx.diffeqsolve(
         terms=drx.ODETerm(ionization),
         solver=GRKT4(),
-        # solver=Tsit5(),
         t0=astart,
         t1=aend,
         dt0=jnp.abs(astart*1e-3),
@@ -322,6 +321,44 @@ def Saha_HeII( a, param ):
     return xe
 
 
+def _get_adaptive_sampling(a0: float, a1: float, N: int) -> jax.Array:
+  """
+  Generate adaptive sampling in scale factor with concentration around recombination.
+
+  Distributes points to concentrate sampling where ionization fraction changes rapidly:
+  - 5% very early times (z > 3000)
+  - 10% pre-recombination (1400 < z < 3000)
+  - 50% recombination era (600 < z < 1400) - where xe changes most
+  - 35% post-recombination (z < 600)
+
+  This improves accuracy of spline interpolation without increasing total points.
+  """
+  # Allocate points adaptively
+  n_very_early = max(8, int(N * 0.05))    # At least 8 points, ~5%
+  n_pre_recomb = max(8, int(N * 0.10))    # ~10%
+  n_recomb = int(N * 0.50)                 # 50% - concentrate here!
+  n_post = N - n_very_early - n_pre_recomb - n_recomb  # ~35%
+
+  # Redshift breakpoints
+  z_break1 = 3000  # Very early
+  z_break2 = 1400  # Start of recombination
+  z_break3 = 600   # End of recombination
+
+  a_break1 = 1.0 / (1.0 + z_break1)
+  a_break2 = 1.0 / (1.0 + z_break2)
+  a_break3 = 1.0 / (1.0 + z_break3)
+
+  # Ensure breakpoints are within bounds
+  a_break1 = jnp.maximum(a_break1, a0)
+
+  # Create segments with geometric spacing
+  a1_seg = jnp.geomspace(a0, a_break1, n_very_early, endpoint=False)
+  a2_seg = jnp.geomspace(a_break1, a_break2, n_pre_recomb, endpoint=False)
+  a3_seg = jnp.geomspace(a_break2, a_break3, n_recomb, endpoint=False)
+  a4_seg = jnp.geomspace(a_break3, a1, n_post)
+
+  return jnp.concatenate([a1_seg, a2_seg, a3_seg, a4_seg])
+
 def compute_thermal_history( *, a0 : float, a1 : float, N : int, rtol : float = 1e-3, atol : float = 1e-6, param : dict ) -> Tuple[jnp.ndarray, jnp.ndarray]:
   """
   Compute the thermal history of the Universe from a0 to a1 in N steps
@@ -338,7 +375,8 @@ def compute_thermal_history( *, a0 : float, a1 : float, N : int, rtol : float = 
       Tuple[jnp.ndarray, jnp.ndarray]: [xeHI, xeHeII, Tm, dxHIda, dxHeIda, dTmda], scale factor
   """
 
-  a = jnp.append(jnp.geomspace(a0,1e-4,16,endpoint=False),jnp.geomspace(1e-4, a1, N+1-16 ))
+  # Use adaptive sampling that concentrates points around recombination
+  a = _get_adaptive_sampling(a0, a1, N+1)
   y_init= jnp.zeros((6, N))
 
   H = param['H0']/100.0
