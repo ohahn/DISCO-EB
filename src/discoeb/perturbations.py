@@ -971,6 +971,7 @@ def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k 
     
 
     # determine output times from aexp_out
+    aexp_out = jnp.atleast_1d(aexp_out)
     tau_out = jax.vmap( lambda a: param['tau_of_a_spline'].evaluate(a) )(aexp_out)
     tau_max = jnp.max(tau_out)
     nout = aexp_out.shape[0]
@@ -1044,6 +1045,7 @@ def evolve_perturbations_batched( *, param, aexp_out, kmin : float, kmax : float
     
 
     # determine output times from aexp_out
+    aexp_out = jnp.atleast_1d(aexp_out)
     tau_out = jax.vmap( lambda a: param['tau_of_a_spline'].evaluate(a) )(aexp_out)
     tau_max = jnp.max(tau_out)
     nout = aexp_out.shape[0]
