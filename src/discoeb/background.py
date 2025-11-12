@@ -316,12 +316,11 @@ def evolve_background( *, param, thermo_module = 'RECFAST', num_thermo: int = 25
     # xeprime = param['xe_of_tau_spline'].derivative( tau )
     # xepprime  = param['xe_of_tau_spline'].derivative2( tau )
     opac       = xe * akthom / aexp**2
-    opacspline = spline_interpolation( tau, opac, integrate_from_start=False)
+    opacspline = spline_interpolation( tau, opac, integrate_from_start=True)
     opacprime, opacpprime = opacspline.derivative12( tau )
 
-    optical_depth = opacspline.integral( tau )
     optical_depth_today = opacspline.integral( param['tau_of_a_spline'].evaluate( 1.0 ) )
-    optical_depth -= optical_depth_today
+    optical_depth = optical_depth_today - opacspline.integral( tau )
 
     expmmu    = jnp.exp(-optical_depth)
     vis       = opac * expmmu

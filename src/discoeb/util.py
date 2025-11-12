@@ -1,6 +1,7 @@
 import jax
 import jax.numpy as jnp
 import jax.scipy
+from functools import partial
 
 # the trapz integration has been moved from jnp to jax.scipy
 # in newer versions of jax, and might disappear altogether
@@ -161,7 +162,7 @@ def spherical_bessel(lmax, x, niterfrac=8):
     """
     Spherical Bessel function computation (GPU-optimized), uses forward recurrence formula 
     (eq. 10.6.1 of https://dlmf.nist.gov/10.6) for maximum parallel efficiency, which is 
-    however unstable for |x| < \ell, so there the continued fraction expansion (eq. 
+    however unstable for |x| < \\ell, so there the continued fraction expansion (eq. 
     10.10.1 of https://dlmf.nist.gov/10.10) is used instead. Current performance bottleneck
     is that the continued fraction has to be evluated.
     

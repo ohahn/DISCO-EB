@@ -399,7 +399,7 @@ def convert_to_output_variables(*, y, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu
             deltar,  thetar / (aH),             # 14-15
             deltanu, thetanu / (aH),            # 16-17
             deltaq,  thetaq / (aH),             # 18-19
-    where aH = \mathcal{H} = a' / a, which is the conformal Hubble rate.
+    where aH = \\mathcal{H} = a' / a, which is the conformal Hubble rate.
     """
 
     Omegac = param['Omegam'] - param['Omegab']
