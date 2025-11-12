@@ -66,7 +66,7 @@ def is_sde(terms: PyTree[AbstractTerm]) -> bool:
 
 from diffrax import LocalLinearInterpolation
 from diffrax import RESULTS
-from diffrax import AbstractTerm
+from diffrax import AbstractTerm, ODETerm
 from diffrax import AbstractAdaptiveSolver
 
 _SolverState: TypeAlias = None
@@ -846,7 +846,7 @@ class Rodas5Transformed(AbstractAdaptiveSolver):
 class Rodas5Batched(AbstractAdaptiveSolver):
     r"""Rodas5 method."""
 
-    term_structure: ClassVar = AbstractTerm
+    term_structure: ClassVar = ODETerm
     interpolation_cls: ClassVar[Callable[..., LocalLinearInterpolation]] = (
         LocalLinearInterpolation
     )

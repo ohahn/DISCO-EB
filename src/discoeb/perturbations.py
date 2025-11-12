@@ -2,7 +2,6 @@ import jax
 import jax.numpy as jnp
 
 from .util import lngamma_complex_e, root_find_bisect, savgol_filter
-from .cosmo import get_neutrino_momentum_bins, get_aprimeoa
 
 import diffrax as drx
 from jaxtyping import Array, PyTree, Scalar
@@ -13,6 +12,9 @@ import jax.flatten_util as fu
 
 from .ode_integrators_stiff import Rodas5, Rodas5Transformed, Rodas5Batched
 from diffrax import Kvaerno5
+
+# Import background functions
+from .background import get_aprimeoa, get_neutrino_momentum_bins
 
 
 def nu_perturb( a : float, amnu: float, psi0: jax.Array, psi1 : jax.Array, psi2 : jax.Array, nqmax : int ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
@@ -131,6 +133,7 @@ def model_synchronous(*, tau, y, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, nqm
 
     # ... metric
     a = y[0]
+    loga = jnp.log(a)
 
     #ahprime = y[1]
     eta = y[2]
@@ -163,15 +166,16 @@ def model_synchronous(*, tau, y, param, kmode, lmaxg, lmaxgp, lmaxr, lmaxnu, nqm
     # cs2     = param['cs2a_of_tau_spline'].evaluate( tau ) / a
     # xe      = param['xe_of_tau_spline'].evaluate( tau )
 
-    cs2     = param['cs2a_of_tau_spline'].evaluate( param['tau_of_a_spline'].evaluate( a ) ) / a
-    xe      = param['xe_of_tau_spline'].evaluate( param['tau_of_a_spline'].evaluate( a ) )
+    # Use pre-composed splines for direct log(a) lookup (performance optimization)
+    cs2     = param['cs2a_of_loga_spline'].evaluate( loga ) / a
+    xe      = param['xe_of_loga_spline'].evaluate( loga )
     
     # ... Photon mass density over baryon mass density
     photbar = param['grhog'] / (param['grhom'] * param['Omegab'] * a)
     pb43 = 4.0 / 3.0 * photbar
 
     # massive neutrinos
-    rhonu = jnp.exp(param['logrhonu_of_loga_spline'].evaluate(jnp.log(a)))
+    rhonu = jnp.exp(param['logrhonu_of_loga_spline'].evaluate(loga))
     # pnu = jnp.exp(param['logpnu_of_loga_spline'].evaluate( jnp.log(a) ) )
 
     # ... quintessence
@@ -633,32 +637,21 @@ def determine_starting_time( *, param, k ):
     tau1 = param['tau_of_a_spline'].evaluate( 0.1 ) # don't start after a=0.1
     tau_k = 1.0/k
 
-    def compute_aprimeoa( a, param ):
-        # assume neutrinos fully relativistic and no DE
-        grho = (
-            param['grhom'] * param['Omegam'] / a
-            + (param['grhog'] + param['grhor'] * (param['Neff'] + param['Nmnu'])) / a**2
-        )
-        return jnp.sqrt( grho / 3.0 )
-
     def get_tauc_tauH( tau, param ):
         akthom = 2.3048e-9 * (1.0 - param['YHe']) * param['Omegab'] * param['H0']**2
         xe = param['xe_of_tau_spline'].evaluate( tau )
         a = param['a_of_tau_spline'].evaluate(tau)
         opac = xe * akthom / a**2
 
-        # grho, _ = compute_rho_p( a, param )
-
-        aprimeoa = compute_aprimeoa( a, param ) #jnp.sqrt( grho / 3.0 )
+        # Note: For starting time calculation, we use the full aprimeoa from background
+        # This is slightly different from the old radiation-only approximation but more accurate
+        aprimeoa = get_aprimeoa( param=param, aexp=a )
         return 1.0/opac, 1.0/aprimeoa
-    
-    
+
+
     def get_tauH( tau, param ):
         a = param['a_of_tau_spline'].evaluate(tau)
-
-        # grho, _ = compute_rho_p( a, param )
-
-        aprimeoa = compute_aprimeoa( a, param ) #jnp.sqrt( grho / 3.0 )
+        aprimeoa = get_aprimeoa( param=param, aexp=a )
         return 1.0/aprimeoa
 
     # condition for small k: tau_c(a) / tau_H(a) < start_small_k_at_tau_c_over_tau_h
@@ -835,11 +828,36 @@ def evolve_modes_batched( *, tau_max, tau_out, param, kmodes,
         return model_synchronous( tau=tau, y=y, param=param, kmode=kmode,  
                                                    lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax)
 
-    # Why this wrapping in a VectorField a.k.a an equinox module? do we ever use the pytree structure of the module?
-    VF_ = VectorField( F )
+    # For Rodas5Batched with Diffrax 0.7.0:
+    # Rodas5Batched extracts: f, _args = args
+    # Then calls: terms.vf(t, y, _args)
+    # We need terms.vf to vmap f over batch, but f is not passed to vf
+    # Solution: Create a closure that captures F
 
-    modelX_ = jax.vmap(VF_, (None, 0, 0))
-    modelX_term = drx.ODETerm( modelX_ )
+    def vf_batched(t, y_batch, args):
+        """
+        Batched vector field for Rodas5Batched.
+
+        Args:
+            t: time scalar
+            y_batch: (batch_size, nvars) batched states
+            args: During compatibility check: tuple (f, batch_params)
+                  During actual solve: just batch_params (kmodes)
+
+        Returns:
+            (batch_size, nvars) batched derivatives
+        """
+        # Handle both compatibility check and actual solve
+        if isinstance(args, tuple) and len(args) == 2:
+            # Compatibility check phase: args = (f, batch_params)
+            # Return zeros for shape inference
+            return jax.tree_util.tree_map(jnp.zeros_like, y_batch)
+        else:
+            # Actual solve phase: args = batch_params (kmodes)
+            # vmap F over batch: F(t, y[i], kmode[i]) for each i
+            return jax.vmap(F, in_axes=(None, 0, 0))(t, y_batch, args)
+
+    modelX_term = drx.ODETerm(vf_batched)
     
     # ... determine the number of active variables (i.e. the number of equations), absent any optimizations
     nvar   = 7 + (lmaxg + 1) + (lmaxgp + 1) + (lmaxr + 1) + nqmax * (lmaxnu + 1) + 2
@@ -950,6 +968,7 @@ def evolve_perturbations( *, param, aexp_out, kmin : float, kmax : float, num_k 
     
 
     # determine output times from aexp_out
+    aexp_out = jnp.atleast_1d(aexp_out)
     tau_out = jax.vmap( lambda a: param['tau_of_a_spline'].evaluate(a) )(aexp_out)
     tau_max = jnp.max(tau_out)
     nout = aexp_out.shape[0]
@@ -1023,6 +1042,7 @@ def evolve_perturbations_batched( *, param, aexp_out, kmin : float, kmax : float
     
 
     # determine output times from aexp_out
+    aexp_out = jnp.atleast_1d(aexp_out)
     tau_out = jax.vmap( lambda a: param['tau_of_a_spline'].evaluate(a) )(aexp_out)
     tau_max = jnp.max(tau_out)
     nout = aexp_out.shape[0]

@@ -213,13 +213,13 @@ class spline_interpolation(object):
     
     def derivative2(self, x_new: jnp.ndarray):
         """
-        Computes the derivative of the spline at new x positions.
+        Computes the second derivative of the spline at new x positions.
         
         Args:
             x_new: scalar or 1D array of new x values.
             
         Returns:
-            The derivative (dy/dx) evaluated at x_new.
+            The derivative (d^2y/dx^2) evaluated at x_new.
         """
         n = self._x_.shape[0]
         x_new = jnp.atleast_1d(x_new)
@@ -233,3 +233,28 @@ class spline_interpolation(object):
         # 2nd derivative of P_i(x) = 2*c_i + 6*d_i*(x-x_i)
         d2ydx2 = 2 * c_local + 6 * d_local * d_val
         return jnp.where(x_new.shape[0] == 1, d2ydx2[0], d2ydx2)
+    
+    def derivative12(self, x_new: jnp.ndarray):
+        """
+        Computes both the first and the second derivative of the spline at new x positions.
+        
+        Args:
+            x_new: scalar or 1D array of new x values.
+            
+        Returns:
+            The derivatives (dy/dx),(d^2y/dx^2) evaluated at x_new.
+        """
+        n = self._x_.shape[0]
+        x_new = jnp.atleast_1d(x_new)
+        idx = jnp.clip(jnp.searchsorted(self._x_, x_new) - 1, 0, n - 2)
+        h_local = self._x_[idx + 1] - self._x_[idx]
+        d_val = x_new - self._x_[idx]
+        # Local coefficients (as defined in the cubic polynomial):
+        b_local = (self._y_[idx + 1] - self._y_[idx]) / h_local - h_local * (self._S_full_[idx + 1] + 2 * self._S_full_[idx]) / 6.0
+        c_local = self._S_full_[idx] / 2.0
+        d_local = (self._S_full_[idx + 1] - self._S_full_[idx]) / (6.0 * h_local)
+        # Derivative of P_i(x) = b_i + 2*c_i*(x-x_i) + 3*d_i*(x-x_i)^2
+        dydx = b_local + 2 * c_local * d_val + 3 * d_local * d_val**2
+        # 2nd derivative of P_i(x) = 2*c_i + 6*d_i*(x-x_i)
+        d2ydx2 = 2 * c_local + 6 * d_local * d_val
+        return jnp.where(x_new.shape[0] == 1, dydx[0], dydx), jnp.where(x_new.shape[0] == 1, d2ydx2[0], d2ydx2)

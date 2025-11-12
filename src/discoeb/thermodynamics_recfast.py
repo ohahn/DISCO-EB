@@ -25,12 +25,11 @@
 ####################################################################################################################
  
 import diffrax as drx
-import jax 
+import jax
 import jax.numpy as jnp
 from jax_cosmo.scipy.integrate import romb
-from functools import partial 
+from functools import partial
 from typing import Tuple
-from discoeb.cosmo import dadtau, dtauda_, get_aprimeoa
 
 from discoeb.ode_integrators_stiff import GRKT4, Rodas5Transformed
 # from diffrax import Tsit5
@@ -144,9 +143,10 @@ def ionization(a, y, params):
   n_He = fHe * n
   Trad = param['Tcmb'] * (1 + z)
   z_term = (1 + z)
-  
+
   # Hubble parameter calculation
   # Hprime = a'/a, dtau = dt/a -> da/dtau/a = da/dt = Ha
+  from .background import get_aprimeoa
   Hz = (1e-5*get_aprimeoa(param=param, aexp=a)) / a * const_c * bigH
   
   # Temperature and rate calculations
@@ -284,7 +284,6 @@ def solve_ionization( *, astart : float, aend : float, ystart : jnp.ndarray, rto
   sol =drx.diffeqsolve(
         terms=drx.ODETerm(ionization),
         solver=GRKT4(),
-        # solver=Tsit5(),
         t0=astart,
         t1=aend,
         dt0=jnp.abs(astart*1e-3),
@@ -322,53 +321,94 @@ def Saha_HeII( a, param ):
     return xe
 
 
-def compute_thermal_history(*, a0: float, a1: float, N: int, rtol: float = 1e-3, atol: float = 1e-6, param: dict) -> Tuple[jnp.ndarray, jnp.ndarray]:
-    """
-    Optimized version of compute_thermal_history that's more GPU-friendly.
-    """
-    # Generate scale factor array with improved spacing 
-    a = jnp.append(jnp.geomspace(a0, 1e-4, 16, endpoint=False), jnp.geomspace(1e-4, a1, N+1-16))
+def _get_adaptive_sampling(a0: float, a1: float, N: int) -> jax.Array:
+  """
+  Generate adaptive sampling in scale factor with concentration around recombination.
+
+  Distributes points to concentrate sampling where ionization fraction changes rapidly:
+  - 5% very early times (z > 3000)
+  - 10% pre-recombination (1400 < z < 3000)
+  - 50% recombination era (600 < z < 1400) - where xe changes most
+  - 35% post-recombination (z < 600)
+
+  This improves accuracy of spline interpolation without increasing total points.
+  """
+  # Allocate points adaptively
+  n_very_early = max(8, int(N * 0.05))    # At least 8 points, ~5%
+  n_pre_recomb = max(8, int(N * 0.10))    # ~10%
+  n_recomb = int(N * 0.50)                 # 50% - concentrate here!
+  n_post = N - n_very_early - n_pre_recomb - n_recomb  # ~35%
+
+  # Redshift breakpoints
+  z_break1 = 3000  # Very early
+  z_break2 = 1400  # Start of recombination
+  z_break3 = 600   # End of recombination
+
+  a_break1 = 1.0 / (1.0 + z_break1)
+  a_break2 = 1.0 / (1.0 + z_break2)
+  a_break3 = 1.0 / (1.0 + z_break3)
+
+  # Ensure breakpoints are within bounds
+  a_break1 = jnp.maximum(a_break1, a0)
+
+  # Create segments with geometric spacing
+  a1_seg = jnp.geomspace(a0, a_break1, n_very_early, endpoint=False)
+  a2_seg = jnp.geomspace(a_break1, a_break2, n_pre_recomb, endpoint=False)
+  a3_seg = jnp.geomspace(a_break2, a_break3, n_recomb, endpoint=False)
+  a4_seg = jnp.geomspace(a_break3, a1, n_post)
+
+  return jnp.concatenate([a1_seg, a2_seg, a3_seg, a4_seg])
+
+def compute_thermal_history( *, a0 : float, a1 : float, N : int, rtol : float = 1e-3, atol : float = 1e-6, param : dict ) -> Tuple[jnp.ndarray, jnp.ndarray]:
+  """
+  Compute the thermal history of the Universe from a0 to a1 in N steps
+
+  Args:
+      a0 (float): initial scale factor
+      a1 (float): final scale factor
+      N (int): number of steps
+      rtol (float, optional): relative tolerance. Defaults to 1e-3.
+      atol (float, optional): absolute tolerance. Defaults to 1e-6.
+      param (dict): dictionary of cosmological parameters
+
+  Returns:
+      Tuple[jnp.ndarray, jnp.ndarray]: [xeHI, xeHeII, Tm, dxHIda, dxHeIda, dTmda], scale factor
+  """
+
+  # Use adaptive sampling that concentrates points around recombination
+  a = _get_adaptive_sampling(a0, a1, N+1)
+  y_init= jnp.zeros((6, N))
+
+  H = param['H0']/100.0
+  HO = H*bigH
+  mu_H = 1.0/(1.0-param['YHe'])
+  Nnow = 3.0 * HO * HO * param['Omegab'] / (8.0 * jnp.pi * const_G * mu_H * const_mH)
+  fHe = param['YHe']/(const_mHe_mH*(1.0-param['YHe']))
+  Tcmb = param['Tcmb']
+  Tcmb2 = Tcmb**2
+  Tcmb3 = Tcmb2*Tcmb
+
+  def loop_body(i, y_arr):
+    astart = a[i]
+    zstart = 1.0/astart - 1.0
+    aend   = a[i+1]
+    zend   = 1.0/aend - 1.0
+    dzda   = -1.0/aend**2
+    y_prev = jnp.where(i > 0, y_arr[:, i-1], jnp.array([1.0, 1.0, param['Tcmb']*(1.0 + zstart), 0.0, 0.0, -param['Tcmb']*(1.0 + zstart)]))
+
+    cond1 = (zend > 3500.0)
+    cond2 = jnp.logical_and(i > 0, y_prev[1] > 0.99)
+    cond3 = jnp.logical_and(i > 0, y_prev[0] > 0.99)
+
+    def f_case1(): # if zend > 3500.0:
+      return jnp.array([1.0, 1.0, param['Tcmb']*(1.0 + zend), 0.0, 0.0, -param['Tcmb']*(1.0 + zend)])
     
-    # Precompute common values used throughout the function
-    H = param['H0']/100.0
-    HO = H * bigH
-    mu_H = 1.0/(1.0-param['YHe'])
-    Nnow = 3.0 * HO * HO * param['Omegab'] / (8.0 * jnp.pi * const_G * mu_H * const_mH)
-    fHe = param['YHe']/(const_mHe_mH*(1.0-param['YHe']))
-    Tcmb = param['Tcmb']
-    Tcmb2 = Tcmb**2
-    Tcmb3 = Tcmb2*Tcmb
-    
-    # Initial values for the state
-    zstart_init = 1.0 / a[0] - 1.0
-    initial_state = jnp.array([1.0, 1.0, Tcmb * (1.0 + zstart_init), 0.0, 0.0, -Tcmb * (1.0 + zstart_init)])
-    
-    # Pre-compute all z values and dzda values to avoid redundant calculations
-    z_values = 1.0 / a[1:] - 1.0
-    dzda_values = -1.0 / a[1:]**2
-    
-    # Prepare arrays of boundary conditions for quick masking
-    high_z_mask = z_values > 3500.0
-    
-    def scan_body(prev_state, idx):
-        """Process one step with scan instead of fori_loop"""
-        i = idx
-        astart = a[i]
-        aend = a[i+1]
-        zend = z_values[i]
-        dzda = dzda_values[i]
-        
-        # Create default outputs for each condition path
-        high_z_output = jnp.array([1.0, 1.0, param['Tcmb']*(1.0 + zend), 0.0, 0.0, -param['Tcmb']*(1.0 + zend)])
-        
-        # Handle HeI recombination path
-        x_H0 = 1.0
-        rhs_He = (jnp.exp(1.5 * jnp.log(CR * param['Tcmb']/(1.0+zend)) 
-                - CB1_He1/(param['Tcmb']*(1.0+zend))) / Nnow) * 4.0
-        x_He0 = 0.5*(jnp.sqrt((rhs_He-1.0)**2 + 4.0*(1.0+fHe)*rhs_He) - (rhs_He-1.0))
-        
-        # Pre-compute the derivative expression for HeI
-        dxHeIdz = ((-3*(-(CB1_He1/Tcmb) + CR*Tcmb)**1.5*(Nnow + 2*fHe*Nnow + 
+    def f_case2(): # elif i>0 and x_He0 > 0.99:
+      x_H0 = 1.0
+      rhs  = (jnp.exp(1.5 * jnp.log(CR * param['Tcmb']/(1.0+zend))
+          - CB1_He1/(param['Tcmb']*(1.0+zend))) / Nnow) * 4.0
+      x_He0 = 0.5*(jnp.sqrt((rhs-1.0)**2 + 4.0*(1.0+fHe)*rhs) - (rhs-1.0))
+      dxHeIdz =((-3*(-(CB1_He1/Tcmb) + CR*Tcmb)**1.5*(Nnow + 2*fHe*Nnow + 
               4*(-((CB1_He1 - CR*Tcmb**2)/(Tcmb*(1+zend))))**1.5 - 
               jnp.sqrt(Nnow**2 + (16*(-CB1_He1 + CR*Tcmb**2)**3)/(Tcmb3*(1 + zend)**3) + 
                 8*(1 + 2*fHe)*Nnow*(-((CB1_He1 - CR*Tcmb**2)/(Tcmb*(1+zend))))**1.5)))
@@ -439,6 +479,7 @@ def evaluate_thermo( *, param : dict, num_thermo = 2048 ) -> jax.Array:
     dTmda    = y[5,:]
     daTmda   = Tm + a * dTmda
     cs2      = const_kB/ const_mH / const_c**2 / mu * Tm * (4 - daTmda / (Tm)) /3
+    from .background import dadtau, dtauda_
     dxedtau  = (dxeHIda + param['fHe'] * dxeHeIda + dxHeIIda) * dadtau(a=a, param=param)
 
     # # compute conformal times tau for all entries in a
