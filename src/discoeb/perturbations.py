@@ -749,9 +749,7 @@ def evolve_one_mode( *, tau_max, tau_out, param, kmode,
             dt0=jnp.minimum(t0/4, 0.5*(t1-t0)),
             y0=y0,
             saveat=saveat,  
-            # stepsize_controller = drx.PIDController(rtol=rtol, atol=atol, norm=lambda t:rms_norm_filtered(t,jnp.array([0,2,3,5,6,7,8,9]), jnp.array([1,kmode**2,1,1,1/kmode**2,1,1/kmode**2,1/kmode**2])), 
-            #                                         pcoeff=pcoeff, icoeff=icoeff, dcoeff=dcoeff, factormax=factormax, factormin=factormin),
-            stepsize_controller = drx.PIDController(rtol=rtol, atol=atol, norm=lambda t:rms_norm_filtered(t,jnp.array([0,2,3,5,6,7]), jnp.array([1,kmode**2,1,1,1/kmode**2,1])), 
+            stepsize_controller = drx.PIDController(rtol=rtol, atol=atol, norm=lambda t:rms_norm_filtered(t,jnp.array([0,2,3,5,6,7]), jnp.array([1,kmode**2,1,1,1/kmode**2,1])),
                                                     pcoeff=pcoeff, icoeff=icoeff, dcoeff=dcoeff, factormax=factormax, factormin=factormin),
             # default controller has icoeff=1, pcoeff=0, dcoeff=0
             max_steps=max_steps,
@@ -817,7 +815,7 @@ def evolve_modes_batched( *, tau_max, tau_out, param, kmodes,
                         nqmax : int, rtol: float, atol: float,
                         pcoeff : float, icoeff : float, dcoeff : float, 
                         factormax : float, factormin : float, max_steps : int  , 
-                        batch_size: int):
+                        batch_size: int, return_full : bool = False):
 
     n_total = len(kmodes)
     n_batches = n_total // batch_size
@@ -887,7 +885,7 @@ def evolve_modes_batched( *, tau_max, tau_out, param, kmodes,
             y0=y0,
             saveat=saveat,  
             stepsize_controller = drx.PIDController(rtol=rtol, atol=atol, 
-                                                    norm=lambda t:rms_norm_filtered_batched(t, jnp.array([0,2,3,5,6,7]), filters), # what to do with this norm?
+                                                    norm=lambda t:rms_norm_filtered_batched(t, jnp.array([0,2,3,5,6,7]), filters),
                                                     pcoeff=pcoeff, icoeff=icoeff, dcoeff=dcoeff, factormax=factormax, factormin=factormin),
             # default controller has icoeff=1, pcoeff=0, dcoeff=0
             max_steps=max_steps,
@@ -907,14 +905,20 @@ def evolve_modes_batched( *, tau_max, tau_out, param, kmodes,
 
     n_batches, n_steps, _batch_size, _nvar = ys.shape
 
-    reordered_ys = jnp.reshape(ys, (n_total, n_steps, _nvar))
+    # Transpose to (n_batches, batch_size, n_steps, nvar) then reshape to (n_total, n_steps, nvar)
+    ys_transposed = jnp.transpose(ys, (0, 2, 1, 3))
+    reordered_ys = jnp.reshape(ys_transposed, (n_total, n_steps, _nvar))
 
-    # convert outputs
-    def calculate_final_ys( kmode, ys): 
-        return jax.vmap( lambda y : convert_to_output_variables( y=y, param=param, kmode=kmode, 
-                                                   lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax) )( ys )
-    
-    return jax.vmap(calculate_final_ys, (0,0))(kmodes, reordered_ys)
+    if not return_full:
+        # convert outputs
+        def calculate_final_ys( kmode, ys): 
+            return jax.vmap( lambda y : convert_to_output_variables( y=y, param=param, kmode=kmode, 
+                                                       lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, lmaxnu=lmaxnu, nqmax=nqmax) )( ys )
+        
+        return jax.vmap(calculate_final_ys, (0,0))(kmodes, reordered_ys)
+    else:
+        # return full solution output
+        return reordered_ys
 
 
 
@@ -999,7 +1003,7 @@ def evolve_perturbations_batched( *, param, aexp_out, kmin : float, kmax : float
                          nqmax : int = 3, rtol: float = 1e-4, atol: float = 1e-4,
                          pcoeff : float = 0.25, icoeff : float = 0.80, dcoeff : float = 0.0,
                          factormax : float = 20.0, factormin : float = 0.3, max_steps : int = 2048 , 
-                         batch_size: int = 16):
+                         batch_size: int = 16, return_full : bool = False, dologk : bool = True):
     """evolve cosmological perturbations in the synchronous gauge
 
     Parameters
@@ -1030,6 +1034,10 @@ def evolve_perturbations_batched( *, param, aexp_out, kmin : float, kmax : float
         absolute tolerance for ODE solver
     batch_size: int
         number of modes to batch together for ODE solver
+    return_full : bool
+        if True, return full state vector; if False, return converted output variables
+    dologk : bool
+        if True, use logarithmic spacing for k; if False, use linear spacing
 
     Returns
     -------
@@ -1037,8 +1045,13 @@ def evolve_perturbations_batched( *, param, aexp_out, kmin : float, kmax : float
         array of shape (num_k, nout, nvar) containing the perturbations
     k : jnp.ndarray
         array of shape (num_k) containing the wavenumbers [in units 1/Mpc]
+    param : dict
+        updated parameter dictionary with output information
     """
-    kmodes = jnp.geomspace(kmin, kmax, num_k)
+    if dologk:
+        kmodes = jnp.geomspace(kmin, kmax, num_k)
+    else:
+        kmodes = jnp.linspace(kmin, kmax, num_k)
     
 
     # determine output times from aexp_out
@@ -1046,16 +1059,24 @@ def evolve_perturbations_batched( *, param, aexp_out, kmin : float, kmax : float
     tau_out = jax.vmap( lambda a: param['tau_of_a_spline'].evaluate(a) )(aexp_out)
     tau_max = jnp.max(tau_out)
     nout = aexp_out.shape[0]
-    param['nout'] = nout
 
     # do all calculations batched in here
     y1 = evolve_modes_batched(tau_max=tau_max, tau_out=tau_out, param=param, kmodes=kmodes, lmaxg=lmaxg, lmaxgp=lmaxgp, lmaxr=lmaxr, 
                                     lmaxnu=lmaxnu, nqmax=nqmax, rtol=rtol, atol=atol,
                                     pcoeff=pcoeff, icoeff=icoeff, dcoeff=dcoeff, 
                                     factormax=factormax, factormin=factormin, max_steps=max_steps,
-                                    batch_size=batch_size )
+                                    batch_size=batch_size, return_full=return_full )
     
-    return y1, kmodes
+    # Store parameters in param dict for compatibility with non-batched version
+    param['lmaxg'] = lmaxg
+    param['lmaxgp'] = lmaxgp
+    param['lmaxr'] = lmaxr
+    param['lmaxnu'] = lmaxnu
+    param['nqmax'] = nqmax
+    param['nout'] = nout
+    param['tau_out'] = tau_out
+    
+    return y1, kmodes, param
 
 
 # @partial(jax.jit, static_argnames=('N'))
