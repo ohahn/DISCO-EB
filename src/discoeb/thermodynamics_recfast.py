@@ -340,7 +340,7 @@ def _get_adaptive_sampling(a0: float, a1: float, N: int) -> jax.Array:
   n_post = N - n_very_early - n_pre_recomb - n_recomb  # ~35%
 
   # Redshift breakpoints
-  z_break1 = 3000  # Very early
+  z_break1 = 10000  # Very early
   z_break2 = 1400  # Start of recombination
   z_break3 = 600   # End of recombination
 
